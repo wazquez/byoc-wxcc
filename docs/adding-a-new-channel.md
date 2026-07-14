@@ -6,7 +6,7 @@ This guide walks you through adding a new channel (Teams, Telegram, Slack, etc.)
 
 **You gather the platform facts. Claude Code can help format them.**
 
-### 1. Research your platform's API (you do this)
+### 1. Research your platform's API
 
 Read your platform's webhook/API documentation and extract:
 - Inbound webhook envelope schema — the JSON shape of an incoming message notification
@@ -16,6 +16,8 @@ Read your platform's webhook/API documentation and extract:
 - Any quirks — rate limits, encoding, E2E encryption, field omissions, etc.
 
 Ideally, trigger a real webhook and capture a concrete JSON example (or copy one from the platform's docs). Write down your findings in plain text or notes.
+
+**Can't find the right docs?** Claude Code can help with this research phase too. Say something like: "I'm adding [platform] support. Help me find the webhook documentation and extract: the webhook JSON schema, signature verification scheme, text fetch API, and send API. Create a spec-capture doc shaped like `docs/webex-messaging-webhooks.md`." Claude Code will search, read, and synthesize the information for you.
 
 ### 2. Create the spec-capture doc (Claude Code can help)
 
