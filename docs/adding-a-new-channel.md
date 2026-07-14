@@ -2,6 +2,61 @@
 
 This guide walks you through adding a new channel (Teams, Telegram, Slack, etc.) to this middleware. The codebase is architected specifically to make this a bounded, channel-local change — adding a channel should never require editing the WxCC integration logic in `src/core/`.
 
+## Quick start (copy-paste prompts for Claude Code)
+
+**If you want to skip the narrative and jump straight to implementation**, here are two Claude Code prompts — one for research, one for implementation. Copy, paste, and adapt the platform name.
+
+### Phase 1: Research the API (first Claude Code session)
+
+```
+I'm adding [PLATFORM] support to this WxCC middleware.
+
+Please help me find and document the [PLATFORM] webhook API specification. 
+I need to understand:
+- The webhook payload JSON schema (what does an incoming message look like?)
+- How webhook signature verification works (HMAC algorithm, header name, what to hash)
+- The message text fetch API (does the webhook include plaintext, or do I need a follow-up call?)
+- The API to send replies back to users
+- Any quirks (rate limits, encoding, message size limits, etc.)
+
+Create a spec-capture document shaped like `docs/webex-messaging-webhooks.md` with:
+- Source URL and capture date
+- Concrete JSON examples of the webhook envelope
+- Signature verification scheme details
+- Quirks and gotchas
+
+I'll use this to implement the adapter.
+```
+
+Claude Code will search, read the docs, and return a structured spec-capture document.
+
+### Phase 2: Implement the adapter (same or next Claude Code session)
+
+```
+I'm implementing [PLATFORM] support for this WxCC middleware.
+
+Here's the [PLATFORM] webhook spec I researched: [paste the spec or reference the doc].
+
+Here's the reference implementation: src/channels/webex-messaging/
+Here's the reference documentation: docs/channels/webex-messaging.md
+
+Walk me through the checklist in docs/architecture-multi-channel.md#checklist-adding-a-new-channel.
+Implement one adapter method at a time:
+1. verifyInboundWebhook ([PLATFORM] signature verification)
+2. resolveExternalConversationId (extract conversation ID from webhook)
+3. parseInboundEvent (normalize to NormalizedInboundMessage)
+4. sendOutboundMessage (send reply via [PLATFORM] API)
+
+After each method, verify with: npm run typecheck && npm test
+Then we'll register in registry.ts, add env vars, write the channel docs, and test end-to-end.
+```
+
+Claude Code will work through the checklist methodically, testing after each step.
+
+---
+
+**Want more detail on each step?** See the full guide below.
+
 ## Before you start
 
 **You gather the platform facts. Claude Code can help format them.**
