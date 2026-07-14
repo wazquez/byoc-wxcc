@@ -4,23 +4,38 @@ This guide walks you through adding a new channel (Teams, Telegram, Slack, etc.)
 
 ## Before you start
 
-Gather the following:
+**You gather the platform facts. Claude Code can help format them.**
 
-1. **Your platform's webhook/API documentation** — specifically:
-   - Inbound webhook envelope schema (the JSON shape of an incoming message notification)
-   - Webhook signature verification scheme (HMAC algorithm, header name, what to hash, secret/key management)
-   - Message text fetch API (if the webhook omits plaintext, like Webex does)
-   - Outbound message-send API (how to POST a reply back to the customer's conversation)
+### 1. Research your platform's API (you do this)
 
-   **Shape your docs like [`docs/webex-messaging-webhooks.md`](webex-messaging-webhooks.md):** include the source URL, capture date, payload envelope with a concrete JSON example, signature details, and any quirks (rate limits, encoding, E2E encryption, etc.).
+Read your platform's webhook/API documentation and extract:
+- Inbound webhook envelope schema — the JSON shape of an incoming message notification
+- Webhook signature verification scheme — HMAC algorithm, header name, what to hash, secret/key management
+- Message text fetch API — does the webhook include plaintext, or do you need a follow-up call?
+- Outbound message-send API — how to POST a reply back to the customer's conversation
+- Any quirks — rate limits, encoding, E2E encryption, field omissions, etc.
 
-2. **Platform bot/app credentials:**
-   - Bot/app account created and authorized with the scopes you need
-   - OAuth token, API key, or webhook secret (whatever the platform uses)
+Ideally, trigger a real webhook and capture a concrete JSON example (or copy one from the platform's docs). Write down your findings in plain text or notes.
 
-3. **Control Hub access** (if available yet):
-   - Create the Custom Messaging channel, asset, entry point, and flow for this platform
-   - Note the `business_address` and other values you'll need in `.env`
+### 2. Create the spec-capture doc (Claude Code can help)
+
+Once you have the raw facts, ask Claude Code to structure them into a spec-capture doc shaped like [`docs/webex-messaging-webhooks.md`](webex-messaging-webhooks.md). The doc should include:
+- Source URL (where you read the docs) and capture date
+- Webhook payload envelope with a concrete JSON example
+- Signature verification scheme details
+- Quirks and gotchas
+
+Example: "Here's the Teams webhook API docs I read. The webhook JSON looks like [paste]. Signature is HMAC-SHA256 in the `authorization` header. Quirks: [list]. Structure this into a spec-capture doc like `webex-messaging-webhooks.md`."
+
+### 3. Platform bot/app credentials
+
+Gather these — you'll need them in `.env.example` (step 5 of the checklist):
+- Bot/app account created and authorized with the scopes you need
+- OAuth token, API key, or webhook secret (whatever the platform uses)
+
+### 4. Control Hub access (if available yet)
+
+Create the Custom Messaging channel, asset, entry point, and flow for this platform in WxCC Control Hub. Note the `business_address` and other values you'll need in `.env`.
 
 ## The implementation checklist
 
@@ -37,12 +52,12 @@ What follows is the layer *around* that checklist: how to actually execute it, e
    cp -r src/channels/_channel-template src/channels/<your-channel>
    ```
 
-2. **Pass the reference docs to Claude Code:**
-   - Your platform's spec-capture doc (the shape of [`webex-messaging-webhooks.md`](webex-messaging-webhooks.md))
-   - [`src/channels/webex-messaging/`](../src/channels/webex-messaging/) (the worked reference implementation)
-   - [`docs/channels/webex-messaging.md`](channels/webex-messaging.md) (the worked reference *documentation*)
+2. **Hand Claude Code the spec doc + reference implementation:**
+   - Your platform's spec-capture doc (the one you gathered facts for, optionally with Claude's help formatting it)
+   - [`src/channels/webex-messaging/`](../src/channels/webex-messaging/) (the worked reference implementation — code)
+   - [`docs/channels/webex-messaging.md`](channels/webex-messaging.md) (the worked reference *documentation* — how to explain your design decisions)
 
-   Tell Claude: "Here are the platform docs and the Webex Messaging reference. Work through the [checklist](architecture-multi-channel.md#adding-a-new-channel) one item at a time, verifying with `npm run typecheck && npm test` after each method."
+   Tell Claude Code: "Here's the platform webhook spec I researched. Here's the Webex Messaging reference (code + docs). Work through the [checklist](architecture-multi-channel.md#adding-a-new-channel) one item at a time, verifying with `npm run typecheck && npm test` after implementing each adapter method."
 
 3. **Checklist pacing:**
    - Implement `verifyInboundWebhook` (signature verification, HMAC details from your platform's docs)
