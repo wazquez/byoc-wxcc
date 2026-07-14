@@ -110,4 +110,19 @@ describe('Orchestrator outbound', () => {
     await expect(orch.handleOutboundEvent(outboundEvent)).resolves.toBeUndefined();
     expect(sendOutboundMessage).not.toHaveBeenCalled();
   });
+
+  it('clears the correlation when a task ends', async () => {
+    const { orch, store } = setup();
+    await store.save({ taskId: 'task-1', channelId: 'webex-messaging', externalConversationId: 'room-1', recentAliasIds: [] });
+
+    // Verify correlation exists before
+    expect(await store.findByTaskId('task-1')).toBeTruthy();
+
+    // Send task:ended event
+    await orch.handleOutboundEvent({ type: 'task:ended', data: { taskId: 'task-1' } });
+
+    // Correlation is deleted
+    expect(await store.findByTaskId('task-1')).toBeNull();
+    expect(await store.findByConversation('webex-messaging', 'room-1')).toBeNull();
+  });
 });

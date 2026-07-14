@@ -97,6 +97,17 @@ export class Orchestrator {
   handleOutboundEvent = async (event: WxccOutboundEvent): Promise<void> => {
     const { store, getAdapter } = this.deps;
 
+    // Task lifecycle: clean up correlation when the task ends so the next message
+    // from the same customer creates a fresh task instead of appending to a dead one.
+    if (event.type === 'task:ended') {
+      const taskId = event.data?.taskId;
+      if (taskId) {
+        console.log(`[outbound] task ${taskId} ended — clearing stale correlation`);
+        await store.delete(taskId);
+      }
+      return;
+    }
+
     if (event.type !== 'task-message:appended') return;
     if (event.data?.messageDirection !== 'OUTBOUND') return;
 
