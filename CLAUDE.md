@@ -100,12 +100,10 @@ folder layout. Practical implications for how this code should be written:
     visible to the bot without needing an @mention (a shared group space would require
     mention-parsing logic — deliberately avoided for this build).
   - Mapping: one Webex `roomId` <-> one active WxCC task.
-- **State storage** (for the roomId <-> taskId <-> aliasId correlation): **not yet decided.**
-  Options discussed: Postgres, SQLite/file-based, Redis. Do not hardcode an engine
-  without confirming — build the correlation logic behind a small repository interface
-  so the backing store is swappable. Regardless of engine, the schema must include a
-  `channelId` field from day one (see "Multi-channel extensibility" below) — this is
-  not optional or deferrable the way the engine choice is.
+- **State storage** (for the roomId <-> taskId <-> aliasId correlation): **In-memory for
+  the vertical slice; engine choice deferred.** Implemented behind the `CorrelationStore`
+  interface so swapping Postgres/SQLite/Redis is a drop-in replacement later. Schema
+  includes `channelId` from day one (non-negotiable for multi-channel extensibility).
 - **Runtime philosophy:** this is a deterministic webhook-relay/state-machine service,
   not an AI/agentic workload. Do not introduce agent frameworks, LLM orchestration, or
   non-deterministic logic into the runtime itself — keep it a plain, well-tested backend.
@@ -131,94 +129,104 @@ without modifying the WxCC integration. Full contract and rationale:
   boundary actually holds by checking the "adding a new channel" checklist in
   `docs/architecture-multi-channel.md` requires zero changes to `src/core/`.
 
-## Known open items (confirm before implementing — do not guess)
+## Webhook verification & auth (all resolved)
 
-This service has **two independent webhook surfaces**, from two different Webex
-products, with two different (likely different) verification schemes. Treat them
-as separate implementations, never shared logic.
+This service has **two independent webhook surfaces**, from two different Webex products,
+with two different verification schemes. Implementations are separate, never shared.
 
-**1. Webex Messaging webhooks (inbound customer messages) — RESOLVED**
+**Webex Messaging webhooks (inbound customer messages):**
 - See `docs/webex-messaging-webhooks.md`.
-- Scheme: `X-Spark-Signature` header, HMAC-SHA1 over the raw request body, using the
-  secret set at webhook-creation time.
-- Gotcha: the webhook payload does **not** include the message text (Webex end-to-end
-  encrypts room content). Requires a follow-up authenticated `GET /v1/messages/{id}`
-  call with the bot token to retrieve the decrypted text before doing anything with it.
-- Bot visibility: in a 1:1 space (our confirmed model) all messages are visible without
-  an @mention — this is why the 1:1 model was chosen.
+- Scheme: `X-Spark-Signature` header, HMAC-SHA1 over raw request body.
+- Quirk: payload omits message text (E2E encrypted); fetch it via `GET /v1/messages/{id}`.
+- Implementation: `src/channels/webex-messaging/adapter.ts` (channel-specific).
 
-**2. WxCC (Webex Contact Center) webhooks (outbound task-message/task-lifecycle events) — RESOLVED**
-- See `docs/wxcc-webhooks-cc.md` (captured manually from the webhooks-cc guide, which
-  is a heavy SPA that hides the "Request Verification" section in the browser).
-- Scheme: `X-WebexCC-Signature` header = **HMAC-SHA256** over the **unmodified raw
-  request body**, keyed by the asset/subscription `secret` (our `WXCC_ASSET_WEBHOOK_SECRET`),
-  hex-encoded, compared to the header. This is **not** the same as the Messaging-side
-  `X-Spark-Signature` (HMAC-SHA1) — keep the two verifiers separate.
-- Replay/version (V2): `X-WebExCC-Timestamp` (must equal body `comciscotimestamp`,
-  within ~5 min tolerance) and `X-WebexCC-Webhook-Version` (e.g. `task-message:1.0.0`).
-- Do NOT copy Cisco's sample verbatim: use `crypto.timingSafeEqual`, fix the
-  incomplete tolerance check, and verify raw bytes (see the "Deviations" section in
-  `docs/wxcc-webhooks-cc.md`).
-- Open nuance: it's unconfirmed whether the asset-level BYOC outbound webhook carries
-  the V2 timestamp header. Safe approach: always verify the signature; run the replay
-  check only when `X-WebExCC-Timestamp` is present.
-- Operational: respond 2xx within 5s (202-accept-then-queue); HTTPS with a valid
-  (non-self-signed) cert.
-- Minimum subscriptions needed per the BYOC spec: `task:failed`, `task-message:appended`,
-  `task-message:append-failed` (recommended to also add `task:new` and other lifecycle
-  events as needed).
+**WxCC webhooks (outbound task-message/task-lifecycle events):**
+- See `docs/wxcc-webhooks-cc.md`.
+- Scheme: `X-WebexCC-Signature` header, HMAC-SHA256 over raw request body, keyed by asset
+  webhook secret (`WXCC_ASSET_WEBHOOK_SECRET`).
+- Replay check (V2): optional `X-WebExCC-Timestamp` against body `comciscotimestamp` (±5min).
+- Implementation: `src/core/webhooks/signature.ts` + `src/core/webhooks/route.ts` (core,
+  channel-agnostic).
 
-**3. WxCC OAuth token refresh flow — RESOLVED**
-- See `docs/webex-service-app-auth.md`. Confirmed (product owner): WxCC Service App
-  auth follows the regular Webex Service App / OAuth rules — no WxCC-specific variant.
-- Refresh grant: `POST https://webexapis.com/v1/access_token` (form-urlencoded) with
-  `grant_type=refresh_token`, `client_id`, `client_secret`, `refresh_token`.
-- Lifetimes: access token **14 days** (`expires_in: 1209600`), refresh token **90 days**
-  (`refresh_token_expires_in: 7776000`). Expired access token → "Invalid Token Error".
-- Implementation musts: refresh **proactively** (before expiry) and retry-once on 401;
-  **persist** the returned access AND refresh tokens (refresh may rotate); `.env` holds
-  only bootstrap tokens and is NOT writable on Cloud Run — runtime tokens need the
-  swappable store / a secret manager. Re-auth is required if the 90-day refresh lapses.
+**WxCC OAuth token refresh:**
+- See `docs/webex-service-app-auth.md`.
+- Service App follows standard Webex OAuth (no WxCC variant).
+- Lifetimes: access token **14 days**, refresh token **90 days**.
+- Implementation: `src/core/wxcc/token-manager.ts` — refreshes proactively on unknown age
+  or near-expiry, persists rotated tokens via `TokenStore` interface.
 
-**Implementation implication:** two separate webhook-verification functions are needed
-(e.g. `verifyWebexMessagingSignature`, HMAC-SHA1/`X-Spark-Signature`, and
-`verifyWxccWebhookSignature`, HMAC-SHA256/`X-WebexCC-Signature`), not one shared one.
-All three known open items are now resolved (verifier schemes #1/#2, token refresh #3)
-— the original "don't guess" blockers are cleared; build against the captured docs.
+## WxCC API — observed spec gaps
 
-## Key WxCC API behaviors to remember
+The live Create Task API (`POST /v2/tasks`) deviates from the captured BYOC specification
+document in specific, documented ways. These gaps are **confirmed via live testing** against
+the production API. Future maintainers should treat the live API as authoritative:
 
-- **Endpoints (confirmed from the Tasks API reference):** base URL is region-specific,
-  `https://api.wxcc-{dc}.cisco.com` (dc ∈ us1|eu1|eu2|ca1|jp1|sg1|anz1, set via
-  `WXCC_API_BASE_URL`). Create Task = `POST /v1/tasks`; Append message =
-  `POST /v1/tasks/{taskId}/messages`; End Task = `POST /v1/tasks/{taskId}/end`.
-  Auth is `Authorization: Bearer <access token>` from the Service App token manager.
-- Create Task supports **inbound task creation only** for Custom Messaging — outbound
-  messages come later via flows/agents and arrive through the configured webhook, not
-  as an API response.
-- A `201 Created` from Create Task only means the request was accepted, not that the
-  task succeeded — use the `task:new` subscription event as the real success signal,
-  `task:failed` as the real failure signal.
-- Common `task:failed` reasons: `CONVERSATION_ALREADY_OPEN`, `CHANNEL_ASSET_UNDEFINED`,
-  `FEATURE_FLAG_DISABLED`, `ENTRY_POINT_NOT_FOUND`, `ORG_DIGITAL_CONTACT_LIMIT_EXCEEDED`,
-  `CONVERSATION_CREATION_FAILED`, plus validation/policy failures.
-- For `CONVERSATION_ALREADY_OPEN` recovery: only call End Task on the earlier task after
-  confirming it's genuinely stale — it may still be legitimately queued or active.
-- PCI-sensitive text is auto-masked by WxCC; attachments that fail PCI/malware scanning
-  are silently dropped (inbound success payload's `eventDetails` will mention it).
+| Field | Captured spec | Live API | Status |
+|-------|---|---|---|
+| Endpoint | `/v1/tasks` | `/v2/tasks` | **Use v2** |
+| `origin` | object `{id, name}` | object `{id, name}` | ✓ Spec correct |
+| `destination` | object `{id, type}` | object `{id, type}` | ✓ Spec correct |
+| `entryPointId` | omitted | **required** | **Spec incomplete** |
+| `mediaType` | omitted (Create example) | **not required** | Spec ambiguous (appears only in Append) |
+
+Implementation in `src/core/wxcc/tasks-client.ts` reflects the live API (v2, objects for
+origin/destination, no entryPointId, no mediaType). If future API changes, update that one
+file — the rest of the codebase depends only on its interface.
+
+## Key WxCC API behaviors
+
+**Task creation & messaging:**
+- Base URL is region-specific: `https://api.wxcc-{dc}.cisco.com` (dc ∈ us1|eu1|eu2|ca1|jp1|sg1|anz1).
+  Set via `WXCC_API_BASE_URL` env var — no universal default.
+- Create Task: `POST /v2/tasks` (inbound only; outbound via flows/agent replies + webhook).
+- Append message: `POST /v2/tasks/{taskId}/messages`.
+- End Task: `POST /v2/tasks/{taskId}/end` (for stale conversation recovery).
+- Auth: `Authorization: Bearer <access token>` from the Service App token manager.
+
+**Task lifecycle signals:**
+- A `201 Created` from Create Task only means the request was accepted, **not** that the
+  task succeeded. Real signals come via subscriptions:
+  - `task:new` — inbound task successfully created.
+  - `task:failed` — Create Task failed; check `reasonCode` for root cause.
+  - `task:ended` — task closed; old correlation should be cleared so next message from
+    same customer creates a fresh task (see orchestrator for lifecycle handling).
+  - `task-message:appended` — outbound message (agent reply) arrived; route back to channel.
+  - `task-message:append-failed` — append failed (task may be closed).
+  - `task:connect`, `task:connected` — agent lifecycle (optional, context-dependent).
+
+**Common failure reasons in `task:failed`:**
+- `CONVERSATION_ALREADY_OPEN` — a task already exists for this customer. Recovery: only
+  call End Task after confirming the earlier one is genuinely stale.
+- `CHANNEL_ASSET_UNDEFINED` — custom-messaging asset not found (check `WXCC_BUSINESS_ADDRESS`).
+- `ENTRY_POINT_NOT_FOUND`, `FEATURE_FLAG_DISABLED`, `ORG_DIGITAL_CONTACT_LIMIT_EXCEEDED` — org/config issues.
+- `CONVERSATION_CREATION_FAILED` — routing or flow issue.
+
+**Data handling:**
+- PCI-sensitive text is auto-masked by WxCC before delivery (no action needed).
+- Attachments that fail PCI/malware scanning are silently dropped; `eventDetails` in the
+  success webhook mentions it.
+
+## What's working (vertical slice complete)
+
+**Bi-directional message flow:**
+- ✅ Inbound: Webex customer message → middleware → Create Task (first) or append (subsequent)
+  → routed to agents.
+- ✅ Outbound: Agent reply → WxCC webhook → middleware → delivered back into Webex space.
+- ✅ Task lifecycle: When a task ends, old correlation is cleared; next message from same
+  customer creates a new task (no server restart required).
+
+**Subscriptions in place:**
+- `task:new`, `task:failed` — real success/failure signals (not just HTTP response codes).
+- `task-message:appended`, `task-message:append-failed` — outbound direction.
+- `task:ended` — for correlation lifecycle cleanup.
+- `task:connect`, `task:connected` — optional, not yet consumed.
 
 ## Working agreements
 
-- Never commit secrets. All credentials (WxCC Service App client ID/secret + tokens,
-  Webex bot token, Custom Messaging asset webhook secret) go in `.env`, gitignored,
-  referenced by name only in this file.
-- Build the smallest possible vertical slice first: one Webex Messaging conversation,
-  round-tripped through WxCC and back (Create Task -> agent/flow reply -> webhook ->
-  delivered back into the Webex space), before adding attachments, retries, or the
-  full set of edge-case handling above.
-- Keep changes small and reviewable.
-- When a decision gets made that isn't reflected here yet, update this file in the same
-  session — don't let it drift out of date.
+- Never commit secrets. All credentials go in `.env` (gitignored), referenced by name only.
+- Core/adapter boundary is stable — adding a new channel requires zero changes to `src/core/`.
+- Keep changes small and reviewable. When a decision gets made, update this file in the
+  same session — don't let it drift out of date.
 
 ## Build/test commands
 

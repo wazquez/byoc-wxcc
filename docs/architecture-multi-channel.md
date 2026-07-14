@@ -134,8 +134,8 @@ exists for one channel, is exactly the kind of retrofit this design is meant to 
 4. Register the adapter in `src/core/registry.ts` (one line — core does not otherwise change).
 5. Add the new channel's own credentials to `.env.example` (never commit real values).
 6. Add `docs/channels/<new-channel>.md` documenting that platform's webhook payload
-   shape, signature scheme, and any quirks — same pattern as
-   `docs/webex-messaging-webhooks.md`.
+   shape, signature scheme, and any quirks — see
+   [`docs/channels/webex-messaging.md`](channels/webex-messaging.md) for a worked example.
 7. Configure the corresponding Custom Messaging channel/asset/entry point/flow in
    WxCC Control Hub for the new channel.
 8. Test the same vertical slice as the first channel: one message round-tripped

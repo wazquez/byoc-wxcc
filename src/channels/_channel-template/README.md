@@ -16,4 +16,5 @@ Then follow the checklist in [`docs/architecture-multi-channel.md`](../../../doc
 
 If any step makes you edit something under `src/core/`, stop — that means the
 core/adapter boundary has a leak; fix the boundary instead of special-casing your
-channel. Use `src/channels/webex-messaging/` as the worked reference example.
+channel. Use `src/channels/webex-messaging/` (code) and
+[`docs/channels/webex-messaging.md`](../../../docs/channels/webex-messaging.md) (docs) as worked reference examples.
