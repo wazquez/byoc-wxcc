@@ -1,0 +1,113 @@
+import { describe, it, expect, vi } from 'vitest';
+import { Orchestrator, type WxccOutboundEvent } from '../src/core/orchestration/orchestrator';
+import { InMemoryCorrelationStore } from '../src/core/state/in-memory-store';
+import type { ChannelAdapter, NormalizedInboundMessage } from '../src/core/channel-adapter';
+
+function inbound(over: Partial<NormalizedInboundMessage> = {}): NormalizedInboundMessage {
+  return {
+    externalConversationId: 'room-1',
+    senderId: 'customer-1',
+    text: 'hello',
+    attachments: [],
+    timestamp: 1000,
+    ...over,
+  };
+}
+
+function fakeTasksClient() {
+  return {
+    createTask: vi.fn().mockResolvedValue('task-1'),
+    appendMessage: vi.fn().mockResolvedValue(undefined),
+    endTask: vi.fn().mockResolvedValue(undefined),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+}
+
+function setup(adapter?: Partial<ChannelAdapter>) {
+  const store = new InMemoryCorrelationStore();
+  const tasksClient = fakeTasksClient();
+  const sendOutboundMessage = vi.fn().mockResolvedValue(undefined);
+  const fullAdapter = { channelId: 'webex-messaging', sendOutboundMessage, ...adapter } as ChannelAdapter;
+  const orch = new Orchestrator({
+    store,
+    tasksClient,
+    getAdapter: (id) => (id === 'webex-messaging' ? fullAdapter : undefined),
+    channel: 'webex-messaging',
+    businessAddress: 'support@channel.biz',
+    newAliasId: () => 'alias-fixed',
+  });
+  return { orch, store, tasksClient, sendOutboundMessage };
+}
+
+describe('Orchestrator inbound', () => {
+  it('creates a task for the first message in a conversation and stores correlation', async () => {
+    const { orch, store, tasksClient } = setup();
+    await orch.handleInboundMessage('webex-messaging', inbound({ text: 'first' }));
+
+    expect(tasksClient.createTask).toHaveBeenCalledWith({
+      originId: 'customer-1',
+      destinationId: 'support@channel.biz',
+      channel: 'webex-messaging',
+      message: { aliasId: 'alias-fixed', text: 'first', timestamp: 1000 },
+    });
+    expect(await store.findByTaskId('task-1')).toMatchObject({
+      channelId: 'webex-messaging',
+      externalConversationId: 'room-1',
+      recentAliasIds: ['alias-fixed'],
+    });
+  });
+
+  it('appends to the existing task on subsequent messages (no second createTask)', async () => {
+    const { orch, tasksClient } = setup();
+    await orch.handleInboundMessage('webex-messaging', inbound({ text: 'first' }));
+    await orch.handleInboundMessage('webex-messaging', inbound({ text: 'second' }));
+
+    expect(tasksClient.createTask).toHaveBeenCalledTimes(1);
+    expect(tasksClient.appendMessage).toHaveBeenCalledWith('task-1', {
+      aliasId: 'alias-fixed',
+      text: 'second',
+      timestamp: 1000,
+    });
+  });
+});
+
+describe('Orchestrator outbound', () => {
+  const outboundEvent: WxccOutboundEvent = {
+    type: 'task-message:appended',
+    data: {
+      taskId: 'task-1',
+      messageDirection: 'OUTBOUND',
+      senderType: 'agent',
+      senderId: 'agent-9',
+      channelParams: { message: { aliasId: 'x', text: 'agent reply', timestamp: 2000 } },
+    },
+  };
+
+  it('delivers an outbound reply to the owning adapter', async () => {
+    const { orch, store, sendOutboundMessage } = setup();
+    await store.save({ taskId: 'task-1', channelId: 'webex-messaging', externalConversationId: 'room-1', recentAliasIds: [] });
+
+    await orch.handleOutboundEvent(outboundEvent);
+
+    expect(sendOutboundMessage).toHaveBeenCalledWith('room-1', {
+      text: 'agent reply',
+      attachments: [],
+      timestamp: 2000,
+      senderType: 'agent',
+      senderId: 'agent-9',
+    });
+  });
+
+  it('ignores inbound-direction events', async () => {
+    const { orch, store, sendOutboundMessage } = setup();
+    await store.save({ taskId: 'task-1', channelId: 'webex-messaging', externalConversationId: 'room-1', recentAliasIds: [] });
+    await orch.handleOutboundEvent({ ...outboundEvent, data: { ...outboundEvent.data, messageDirection: 'INBOUND' } });
+    expect(sendOutboundMessage).not.toHaveBeenCalled();
+  });
+
+  it('drops events for an unknown taskId without throwing', async () => {
+    const { orch, sendOutboundMessage } = setup();
+    await expect(orch.handleOutboundEvent(outboundEvent)).resolves.toBeUndefined();
+    expect(sendOutboundMessage).not.toHaveBeenCalled();
+  });
+});
