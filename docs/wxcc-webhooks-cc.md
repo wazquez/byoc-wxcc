@@ -33,8 +33,11 @@ HMAC-SHA256(rawBody, secret)  ->  hex  ==  X-WebexCC-Signature
   re-serialized JSON parse. (This is why our webhook routes must capture the raw
   body — see the Express note below.)
 - For BYOC, the `secret` is the one configured on the Custom Messaging **asset** in
-  Control Hub (our `WXCC_ASSET_WEBHOOK_SECRET`). In the generic Subscriptions-API
-  example the secret is looked up per-subscription via the id parsed from `source`.
+  Control Hub (our `WXCC_ASSET_WEBHOOK_SECRET`). Cisco's generic sample looks the
+  secret up *per subscription* via the id parsed from `source` — **this middleware
+  deliberately does not.** Its `/webhooks/wxcc` route verifies every request against
+  the single `WXCC_ASSET_WEBHOOK_SECRET`, so **every subscription you create must
+  use that same value as its `secret`** (see "Provisioning subscriptions" below).
 
 ## Headers
 
@@ -159,6 +162,48 @@ asset webhook sends `X-WebexCC-Webhook-Version: task-message:1.0.0`.
 **Safe implementation:** always verify the HMAC-SHA256 signature; additionally run
 the replay/timestamp check **only when `X-WebExCC-Timestamp` is present**. Correct
 either way, and future-proof if the asset webhook gains V2 semantics.
+
+## Provisioning subscriptions (manual — this repo ships no client)
+
+The middleware **receives and logs** subscription webhooks on `/webhooks/wxcc`, but
+it does **not** create, list, reconcile, or delete subscriptions. Provisioning them
+is a manual step the developer does out-of-band — Postman, Bruno, `curl`, or a
+throwaway script; whatever they prefer. (If auto-provisioning is ever wanted, a
+Subscriptions API client would live in `src/core/wxcc/` and be wired from
+`server.ts`; nothing else in core changes.)
+
+**Recommended event set** (from `docs/wxcc-byoc-custom-messaging.md`):
+
+| Event | Cisco says | Middleware today |
+| --- | --- | --- |
+| `task:failed` | minimum | log-only (`console.warn` with `reason`) |
+| `task-message:appended` | minimum | INBOUND echo → log-only; OUTBOUND → relayed to channel *(OUTBOUND also arrives via the asset webhook)* |
+| `task-message:append-failed` | minimum | log-only (`console.warn` with `reason`) |
+| `task:new` | recommended | log-only ("create-task confirmed") |
+| `task:ended` | as needed | **acted on** — clears the correlation |
+| `task:connect`, `task:connected` | as needed | log-only |
+
+Use the [List Event Types API](https://developer.webex.com/webex-contact-center/docs/api/v1/subscriptions/list-event-types)
+to discover current event types and resource versions.
+
+**Required values for every subscription:**
+
+- `webhookUrl` (or the equivalent field for the API version you use) = `<public-base-url>/webhooks/wxcc`
+  — the same URL as the asset webhook. All event types land on this one route; the
+  orchestrator dispatches by `type`.
+- `secret` = the value of `WXCC_ASSET_WEBHOOK_SECRET`. The route verifies **every**
+  request against that single secret, so a different secret — or omitting `secret`,
+  which suppresses the `X-WebexCC-Signature` header entirely — makes every delivery
+  fail with `401` and `[wxcc] signature verification FAILED`.
+
+**Gotchas learned the hard way:**
+
+- A stale subscription pointing at an old URL with a *different* secret produces
+  exactly one `401` per event while a duplicate delivery via the asset webhook still
+  succeeds — looks like intermittent failure. When rotating the public URL, update
+  **every** subscription's `webhookUrl` *and* the asset webhook.
+- Quick tunnels (`*.trycloudflare.com`, default `ngrok`) get a new hostname on every
+  restart. A named tunnel / reserved domain avoids re-provisioning each time.
 
 ## Still unresolved elsewhere
 

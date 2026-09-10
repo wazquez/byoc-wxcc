@@ -6,9 +6,11 @@
 //   Inbound:  adapter produces a NormalizedInboundMessage -> look up correlation
 //             -> Create Task (first message) or append via Task Messages
 //             (subsequent) -> record taskId/aliasId.
-//   Outbound: WxCC outbound webhook -> find the task's correlation record ->
-//             resolve the owning adapter from the registry -> call its
-//             sendOutboundMessage.
+//   WxCC events (handleOutboundEvent): every request on /webhooks/wxcc, from BOTH
+//             the asset-level webhook and the hand-provisioned Subscriptions.
+//             `task:ended` clears the correlation; OUTBOUND `task-message:appended`
+//             is resolved to the owning adapter and delivered via its
+//             sendOutboundMessage. Every other event type is log-only for now.
 //
 // This is deliberately deterministic relay/state-machine logic — no AI/agent
 // frameworks in the runtime (see CLAUDE.md "Runtime philosophy").

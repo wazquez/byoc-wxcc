@@ -94,6 +94,17 @@ Gather these — you'll need them in `.env.example` (step 5 of the checklist):
 
 Create the Custom Messaging channel, asset, entry point, and flow for this platform in WxCC Control Hub. Note the `business_address` and other values you'll need in `.env`.
 
+### 5. Provision the WxCC task-lifecycle subscriptions (manual, one-time)
+
+The middleware **receives and logs** WxCC subscription webhooks but does **not** create
+them — there's no Subscriptions API client in this repo. Create them yourself with
+Postman, Bruno, `curl`, or a throwaway script (your choice). Point every subscription at
+`<public-base-url>/webhooks/wxcc` and set every `secret` to `WXCC_ASSET_WEBHOOK_SECRET`
+(that one route verifies all WxCC-side traffic against that single secret). Recommended
+event list and request details: [`wxcc-webhooks-cc.md`](wxcc-webhooks-cc.md) →
+"Provisioning subscriptions". This is a WxCC-side step and is **identical for every
+channel** — it is not part of the per-channel adapter work below.
+
 ## The implementation checklist
 
 The canonical, up-to-date step-by-step checklist lives in [`docs/architecture-multi-channel.md`](architecture-multi-channel.md#adding-a-new-channel) — read it there, not here. That doc is the source of truth to avoid drift.
@@ -134,7 +145,13 @@ What follows is the layer *around* that checklist: how to actually execute it, e
 
 7. **Write `docs/channels/<your-channel>.md`:** document what you built, following the shape of [`docs/channels/webex-messaging.md`](channels/webex-messaging.md). Sections: Overview, Inbound (webhook envelope, signature verification, parsing quirks, sender identity logic), Outbound, Configuration, Known limitations, See also. **Explicitly note which decisions are specific to your platform vs. which are generic patterns** — Claude Code will have added comments in your code already, but the doc should restate it so the next maintainer understands the choices.
 
-8. **Test end-to-end:** `npm run dev`, send one message from your platform, watch the logs for `[inbound]` and `[outbound]` markers (per `docs/CLAUDE.md`), confirm it lands on an agent, and confirm the agent's reply bounces back into your platform's conversation. (This requires the Control Hub setup from "Before you start" — entry point, flow, agent availability, etc.)
+8. **Test end-to-end:** `npm run dev`, send one message from your platform, watch the logs
+   for `[inbound]` (your channel) and `[wxcc]` (everything from WxCC) markers, confirm it
+   lands on an agent, and confirm the agent's reply bounces back into your platform's
+   conversation. With the subscriptions from step 5 in place you'll also see `[wxcc] task
+   <id> task:new — create-task confirmed`, `task:connected`, etc. as log-only lines. (This
+   requires the Control Hub setup from "Before you start" — entry point, flow, agent
+   availability, etc.)
 
 ## A note on `CLAUDE.md`
 
@@ -168,6 +185,14 @@ The registry (`src/core/registry.ts`) deliberately throws a loud error if two ad
 
 **"No adapter found for channel..." in the logs:**
 The `externalConversationId` you extract in `resolveExternalConversationId` doesn't match the `channelId` you registered. The orchestrator correlates them; if they diverge, the outbound webhook won't find the right adapter. Double-check both values are stable across message round-trips.
+
+**`[wxcc] signature verification FAILED — rejecting 401` on some events but not others:**
+A WxCC subscription is signing with the wrong secret (or none). Every subscription's
+`secret` must equal `WXCC_ASSET_WEBHOOK_SECRET`. A common cause: a stale subscription
+left pointing at an old public URL after you rotated the tunnel/domain — it keeps firing
+with an old secret. Fix: list your subscriptions (Postman/Bruno), delete or re-point the
+stale ones, and update the asset webhook URL too. See
+[`wxcc-webhooks-cc.md`](wxcc-webhooks-cc.md) → "Provisioning subscriptions".
 
 ## See also
 

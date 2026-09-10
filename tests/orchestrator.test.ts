@@ -111,6 +111,31 @@ describe('Orchestrator outbound', () => {
     expect(sendOutboundMessage).not.toHaveBeenCalled();
   });
 
+  it('logs but does not act on task:failed (log-only)', async () => {
+    const { orch, store, tasksClient, sendOutboundMessage } = setup();
+    await store.save({ taskId: 'task-1', channelId: 'webex-messaging', externalConversationId: 'room-1', recentAliasIds: [] });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await orch.handleOutboundEvent({
+      type: 'task:failed',
+      data: { taskId: 'task-1', reason: 'CONVERSATION_ALREADY_OPEN', errorMessage: 'already open with task ab4' },
+    });
+
+    // Correlation untouched, no side effects — just a log line.
+    expect(await store.findByTaskId('task-1')).toBeTruthy();
+    expect(tasksClient.endTask).not.toHaveBeenCalled();
+    expect(sendOutboundMessage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('task:failed'));
+    warn.mockRestore();
+  });
+
+  it('acknowledges an unrecognized event type without throwing', async () => {
+    const { orch } = setup();
+    await expect(
+      orch.handleOutboundEvent({ type: 'task:some-future-event', data: { taskId: 'task-1' } }),
+    ).resolves.toBeUndefined();
+  });
+
   it('clears the correlation when a task ends', async () => {
     const { orch, store } = setup();
     await store.save({ taskId: 'task-1', channelId: 'webex-messaging', externalConversationId: 'room-1', recentAliasIds: [] });

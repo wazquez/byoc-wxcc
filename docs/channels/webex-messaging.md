@@ -47,7 +47,19 @@ The `senderId` sent to WxCC's Create Task becomes the `origin.id`. This implemen
 
 ## Outbound: WxCC to Webex Messaging
 
-When an agent sends a reply through the WxCC flow, the middleware receives a `task-message:appended` webhook event. The orchestrator looks up the task's owning channel (webex-messaging) and calls `sendOutboundMessage(roomId, message)`.
+When an agent sends a reply through the WxCC flow, the middleware receives an
+**OUTBOUND** `task-message:appended` webhook event on `/webhooks/wxcc` (delivered by
+the asset-level webhook). The orchestrator looks up the task's owning channel
+(webex-messaging) and calls `sendOutboundMessage(roomId, message)`.
+
+The same `/webhooks/wxcc` route also receives the task-lifecycle / inbound
+task-message *subscription* events (`task:new`, `task:failed`, INBOUND
+`task-message:appended`, `task-message:append-failed`, `task:connect`,
+`task:connected`, `task:ended`). Only `task:ended` (clears correlation) and OUTBOUND
+`task-message:appended` (this relay) change behaviour; the rest are log-only. Those
+subscriptions are **not** created by this middleware — the developer provisions them
+by hand (Postman / Bruno / a script). See
+[`../wxcc-webhooks-cc.md`](../wxcc-webhooks-cc.md) → "Provisioning subscriptions".
 
 **Implementation:** `src/channels/webex-messaging/client.ts` → `POST /v1/messages`
 
@@ -68,11 +80,19 @@ When an agent sends a reply through the WxCC flow, the middleware receives a `ta
 
 1. Create a **Custom Messaging channel** (messaging policies, text/attachment support).
 2. Create a **Custom Messaging asset** (business address, webhook URL, webhook secret).
+   The webhook URL is `<public-base-url>/webhooks/wxcc`; the secret becomes
+   `WXCC_ASSET_WEBHOOK_SECRET`. This asset webhook carries the OUTBOUND agent/flow replies.
 3. Create a **Custom Messaging entry point** (maps inbound tasks to a flow).
 4. Wire the entry point to a **flow** (defines routing: which queue, team, skill, etc.).
-5. Create a **webhook subscription** for the asset (the WxCC outbound events that trigger agent replies).
+5. **Provision the task-lifecycle subscriptions** via the Subscriptions API — a manual
+   step done with Postman / Bruno / a script (this middleware has no Subscriptions API
+   client). Point every subscription's `webhookUrl` at the *same* `<public-base-url>/webhooks/wxcc`
+   and set its `secret` to the *same* `WXCC_ASSET_WEBHOOK_SECRET`. Recommended event
+   list and details: [`../wxcc-webhooks-cc.md`](../wxcc-webhooks-cc.md) → "Provisioning subscriptions".
 
-The middleware's outbound webhook URL points to the asset's webhook config in Control Hub, forming the two-way coupling: inbound messages go to the middleware via the Webex Messaging webhook, and outbound replies come back via the WxCC asset webhook.
+The middleware's `/webhooks/wxcc` URL is the single WxCC-side ingress: the asset webhook
+and every subscription deliver there. Inbound customer messages arrive separately via the
+Webex Messaging webhook.
 
 ## Known limitations
 

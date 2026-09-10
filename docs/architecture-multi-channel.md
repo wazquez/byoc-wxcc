@@ -37,7 +37,10 @@ involved — that's precisely why it belongs in core.
 ```
 src/
   core/
-    wxcc/            # OAuth/token manager, Task + Task Messages + Subscriptions clients
+    wxcc/            # OAuth/token manager, Task + Task Messages clients
+                     #   (no Subscriptions API client — subscriptions are created
+                     #    manually by the developer; their webhooks land on the
+                     #    same /webhooks/wxcc route)
     webhooks/         # WxCC outbound webhook receiver + its signature verification
     state/            # Correlation store (interface + implementation), channel-agnostic
     orchestration/     # Inbound-event handler, outbound-event dispatcher, task lifecycle

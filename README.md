@@ -41,7 +41,25 @@ curl http://localhost:8080/healthz
 # {"status":"ok"}
 ```
 
-### 4. Deployment
+### 4. Register the webhooks (manual, one-time)
+
+Two Webex products call this middleware, and neither webhook is created by the app:
+
+| Webhook | Points at | Verified with |
+|---|---|---|
+| **Webex Messaging** (inbound customer messages) | `<public-url>/webhooks/webex-messaging` | `WEBEX_MESSAGING_WEBHOOK_SECRET` |
+| **WxCC asset webhook** (outbound agent/flow replies) | `<public-url>/webhooks/wxcc` | `WXCC_ASSET_WEBHOOK_SECRET` |
+| **WxCC subscriptions** (task lifecycle: `task:new`, `task:failed`, …) | `<public-url>/webhooks/wxcc` (same route) | `WXCC_ASSET_WEBHOOK_SECRET` (same secret) |
+
+The WxCC **subscriptions** are optional for the basic round-trip but recommended by
+Cisco. Create them yourself with Postman / Bruno / `curl` / a script — this repo has
+no Subscriptions API client. Every subscription must use `<public-url>/webhooks/wxcc`
+as its URL and `WXCC_ASSET_WEBHOOK_SECRET` as its `secret`. See
+[`docs/wxcc-webhooks-cc.md`](docs/wxcc-webhooks-cc.md) → "Provisioning subscriptions"
+for the event list and gotchas (especially: re-point every subscription when your
+public URL changes).
+
+### 5. Deployment
 
 For local testing: `npm run dev` (live reload with tsx watch)
 
@@ -64,8 +82,8 @@ src/
 ├── core/              # Channel-agnostic WxCC integration
 │   ├── channel-adapter.ts      # ChannelAdapter interface contract
 │   ├── orchestration/          # Inbound/outbound state machine
-│   ├── wxcc/                   # WxCC API & token management
-│   ├── webhooks/               # WxCC outbound webhook receiver
+│   ├── wxcc/                   # WxCC Tasks API & token management (no Subscriptions client)
+│   ├── webhooks/               # /webhooks/wxcc receiver — asset webhook + subscription events
 │   └── state/                  # Correlation store (in-memory stub)
 ├── channels/          # Channel implementations (one per platform)
 │   ├── webex-messaging/        # Reference implementation

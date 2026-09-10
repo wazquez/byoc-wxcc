@@ -64,8 +64,12 @@ folder layout. Practical implications for how this code should be written:
 - Obtaining and refreshing OAuth tokens for the WxCC Service App
 - Calling the Create Task API for the initial inbound message
 - Calling the Task Messages API for subsequent inbound messages
-- Processing outbound webhooks received from the WxCC asset-level webhook URL
-- Subscribing to WxCC task lifecycle and inbound task-message events
+- Processing webhooks received on `/webhooks/wxcc` — both the asset-level outbound webhook
+  and the Subscriptions API task-lifecycle / inbound task-message events (received & logged;
+  see "Subscription events" below for which are acted on)
+- NOT responsible for *creating* the subscriptions — that is a manual step the developer
+  does out-of-band (Postman / Bruno / a script of their choice); this repo ships no
+  Subscriptions API client
 
 **Webex Contact Center is responsible for:**
 - Validating and routing Custom Messaging interactions
@@ -185,14 +189,17 @@ file — the rest of the codebase depends only on its interface.
 
 **Task lifecycle signals:**
 - A `201 Created` from Create Task only means the request was accepted, **not** that the
-  task succeeded. Real signals come via subscriptions:
-  - `task:new` — inbound task successfully created.
-  - `task:failed` — Create Task failed; check `reasonCode` for root cause.
-  - `task:ended` — task closed; old correlation should be cleared so next message from
-    same customer creates a fresh task (see orchestrator for lifecycle handling).
-  - `task-message:appended` — outbound message (agent reply) arrived; route back to channel.
-  - `task-message:append-failed` — append failed (task may be closed).
-  - `task:connect`, `task:connected` — agent lifecycle (optional, context-dependent).
+  task succeeded. Real signals come via subscription webhooks (which the developer creates
+  manually — see "Subscription events" under "What's working"):
+  - `task:new` — inbound task successfully created. *Currently log-only.*
+  - `task:failed` — Create Task failed; check `reason` for root cause. *Currently log-only.*
+  - `task:ended` — task closed; orchestrator clears the correlation so the next message from
+    the same customer creates a fresh task. **Acted on.**
+  - `task-message:appended` — OUTBOUND (agent/flow reply) is relayed to the channel
+    (**acted on**, via the asset webhook); INBOUND is the echo of the customer's own message
+    (log-only).
+  - `task-message:append-failed` — inbound append rejected by WxCC. *Currently log-only.*
+  - `task:connect`, `task:connected` — agent lifecycle. *Currently log-only.*
 
 **Common failure reasons in `task:failed`:**
 - `CONVERSATION_ALREADY_OPEN` — a task already exists for this customer. Recovery: only
@@ -215,11 +222,22 @@ file — the rest of the codebase depends only on its interface.
 - ✅ Task lifecycle: When a task ends, old correlation is cleared; next message from same
   customer creates a new task (no server restart required).
 
-**Subscriptions in place:**
-- `task:new`, `task:failed` — real success/failure signals (not just HTTP response codes).
-- `task-message:appended`, `task-message:append-failed` — outbound direction.
-- `task:ended` — for correlation lifecycle cleanup.
-- `task:connect`, `task:connected` — optional, not yet consumed.
+**Subscription events — received & logged, not provisioned by this app:**
+- The `/webhooks/wxcc` route accepts BOTH delivery paths on one URL: the asset-level
+  webhook (outbound `task-message:appended`) and the Subscriptions API webhooks
+  (`task:new`, `task:failed`, `task-message:appended` INBOUND, `task-message:append-failed`,
+  `task:connect`, `task:connected`, `task:ended`).
+- `orchestrator.handleOutboundEvent` handles `task:ended` (clears correlation) and outbound
+  `task-message:appended` (relays to the channel). **Every other event type is log-only**
+  (`[wxcc] task <id> <type> — …`) — visible during a demo, no state changes yet. `task:failed`
+  and `task-message:append-failed` are the likely next candidates for real handling.
+- **Creating the subscriptions is a manual, out-of-band step done by the developer** with
+  Postman / Bruno / a throwaway script — their choice. This repo has **no Subscriptions API
+  client** and does not register, reconcile, or delete subscriptions. All subscriptions MUST
+  be created with `secret` == `WXCC_ASSET_WEBHOOK_SECRET` and `webhookUrl` ==
+  `<public-base-url>/webhooks/wxcc` (the route verifies every request against that one secret;
+  a mismatched or missing secret → 401). See `docs/wxcc-webhooks-cc.md` for the recommended
+  event list and the request shape.
 
 ## Working agreements
 

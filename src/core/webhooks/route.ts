@@ -32,11 +32,13 @@ export function wxccWebhookRoute(deps: WxccWebhookRouteDeps): Router {
 
     const signature = header(req.headers[WXCC_SIGNATURE_HEADER]);
     if (!verifyWxccWebhookSignature(rawBody, signature, deps.secret)) {
-      console.warn('[wxcc] outbound webhook signature verification FAILED — rejecting 401');
+      console.warn('[wxcc] signature verification FAILED — rejecting 401');
       res.status(401).send('invalid signature');
       return;
     }
-    console.log('[wxcc] outbound webhook verified');
+    // Success is intentionally silent — every verified request is immediately
+    // followed by an orchestrator log line saying what actually arrived, so a
+    // per-request "verified" line here would just double the noise.
 
     let event: WxccOutboundEvent;
     try {
