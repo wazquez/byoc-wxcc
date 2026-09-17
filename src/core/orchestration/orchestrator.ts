@@ -17,6 +17,20 @@ import type { CorrelationStore } from '../state/store';
 import type { WxccTasksClient } from '../wxcc/tasks-client';
 
 /**
+ * One attachment as WxCC's outbound webhook shapes it — NOT the same field names as
+ * `NormalizedAttachment` (core's shape uses `fileUrl`; WxCC's wire shape uses `url`).
+ * Kept as its own type so the mapping between the two is explicit at the one call
+ * site that does it, rather than silently coercing field names. Per
+ * docs/wxcc-byoc-custom-messaging.md, this `url` is short-lived/signed — fetch it
+ * promptly, don't persist it.
+ */
+export interface WxccOutboundAttachment {
+  url: string;
+  fileName: string;
+  mimeType: string;
+}
+
+/**
  * WxCC webhook body. Two delivery paths land on the same `/webhooks/wxcc` route
  * (see docs/wxcc-byoc-custom-messaging.md):
  *   - the asset-level webhook — outbound `task-message:appended` only, and
@@ -34,7 +48,13 @@ export interface WxccOutboundEvent {
     senderType?: 'system' | 'agent';
     senderId?: string;
     channelParams?: {
-      message?: { aliasId?: string; text?: string; timestamp?: number };
+      message?: {
+        aliasId?: string;
+        text?: string;
+        timestamp?: number;
+        /** Present when `channelParams.type` is `text-with-attachments` (outbound only). */
+        attachments?: WxccOutboundAttachment[];
+      };
     };
     /** Present on `task:failed` / `task-message:append-failed` — the root-cause code. */
     reason?: string;
@@ -73,7 +93,15 @@ export class Orchestrator {
   ): Promise<void> => {
     const { store, tasksClient, channel, businessAddress } = this.deps;
     const aliasId = this.newAliasId();
-    const payload = { aliasId, text: message.text, timestamp: message.timestamp };
+    const payload = {
+      aliasId,
+      text: message.text,
+      timestamp: message.timestamp,
+      // Already re-hosted by the adapter (see FileRelay, src/core/files/relay.ts) —
+      // by the time a NormalizedInboundMessage reaches core, every fileUrl is one
+      // WxCC can fetch unauthenticated. Core just forwards the array as-is.
+      attachments: message.attachments,
+    };
 
     const existing = await store.findByConversation(channelId, message.externalConversationId);
     if (!existing) {
@@ -196,7 +224,15 @@ export class Orchestrator {
     const m = event.data.channelParams?.message ?? {};
     const outbound: NormalizedOutboundMessage = {
       text: m.text ?? '',
-      attachments: [], // text-only slice
+      // Field-name mapping happens HERE, once: WxCC's wire shape uses `url`, core's
+      // NormalizedAttachment uses `fileUrl` (see WxccOutboundAttachment's comment).
+      // `url` is a short-lived signed URL per the spec — the adapter must fetch it
+      // (via FileRelay.fetch) before delivering, not persist it.
+      attachments: (m.attachments ?? []).map((a) => ({
+        fileName: a.fileName,
+        mimeType: a.mimeType,
+        fileUrl: a.url,
+      })),
       timestamp: m.timestamp ?? 0,
       senderType: event.data.senderType,
       senderId: event.data.senderId,

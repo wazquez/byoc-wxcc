@@ -48,7 +48,7 @@ describe('Orchestrator inbound', () => {
       originId: 'customer-1',
       destinationId: 'support@channel.biz',
       channel: 'webex-messaging',
-      message: { aliasId: 'alias-fixed', text: 'first', timestamp: 1000 },
+      message: { aliasId: 'alias-fixed', text: 'first', timestamp: 1000, attachments: [] },
     });
     expect(await store.findByTaskId('task-1')).toMatchObject({
       channelId: 'webex-messaging',
@@ -67,7 +67,19 @@ describe('Orchestrator inbound', () => {
       aliasId: 'alias-fixed',
       text: 'second',
       timestamp: 1000,
+      attachments: [],
     });
+  });
+
+  it('forwards attachments already staged by the adapter to Create Task', async () => {
+    const { orch, tasksClient } = setup();
+    const attachments = [{ fileName: 'order.pdf', mimeType: 'application/pdf', fileUrl: 'https://relay.example/files/1' }];
+
+    await orch.handleInboundMessage('webex-messaging', inbound({ text: 'see attached', attachments }));
+
+    expect(tasksClient.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.objectContaining({ attachments }) }),
+    );
   });
 });
 
@@ -92,6 +104,34 @@ describe('Orchestrator outbound', () => {
     expect(sendOutboundMessage).toHaveBeenCalledWith('room-1', {
       text: 'agent reply',
       attachments: [],
+      timestamp: 2000,
+      senderType: 'agent',
+      senderId: 'agent-9',
+    });
+  });
+
+  it('maps WxCC outbound attachment field names (url) to NormalizedAttachment (fileUrl)', async () => {
+    const { orch, store, sendOutboundMessage } = setup();
+    await store.save({ taskId: 'task-1', channelId: 'webex-messaging', externalConversationId: 'room-1', recentAliasIds: [] });
+
+    await orch.handleOutboundEvent({
+      ...outboundEvent,
+      data: {
+        ...outboundEvent.data,
+        channelParams: {
+          message: {
+            aliasId: 'x',
+            text: 'here is the document',
+            timestamp: 2000,
+            attachments: [{ url: 'https://wxcc.example/signed/abc', mimeType: 'application/pdf', fileName: 'doc.pdf' }],
+          },
+        },
+      },
+    });
+
+    expect(sendOutboundMessage).toHaveBeenCalledWith('room-1', {
+      text: 'here is the document',
+      attachments: [{ fileName: 'doc.pdf', mimeType: 'application/pdf', fileUrl: 'https://wxcc.example/signed/abc' }],
       timestamp: 2000,
       senderType: 'agent',
       senderId: 'agent-9',

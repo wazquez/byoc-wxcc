@@ -19,6 +19,16 @@ export const config = {
   /** HTTP port. Cloud Run injects PORT; 8080 is the local/default fallback. */
   port: Number(env('PORT', '8080')),
 
+  /**
+   * This process's own public HTTPS URL (no trailing slash) — the Cloudflare
+   * Tunnel host in local dev, the Cloud Run URL in production. Needed only by
+   * LocalFileRelay to build URLs under /files/:id that WxCC/the channel platform
+   * can retrieve; unused otherwise. Must match whatever you actually registered
+   * as the webhook URLs (see CLAUDE.md webhook verification section) — attachment
+   * URLs live on the same host.
+   */
+  publicBaseUrl: env('PUBLIC_BASE_URL'),
+
   /** WxCC Service App OAuth credentials + org. */
   wxcc: {
     clientId: env('WXCC_SERVICE_APP_CLIENT_ID'),

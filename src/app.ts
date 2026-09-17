@@ -12,6 +12,13 @@ export interface AppRoutes {
   webexInbound?: Router;
   /** WxCC outbound webhook (agent/flow reply -> middleware). */
   wxccOutbound?: Router;
+  /**
+   * Serves attachment bytes staged by a LocalFileRelay (see src/core/files/).
+   * Optional: only present when the deployment uses the local-disk relay; a
+   * Cloud-Storage-backed relay serves files from the bucket directly and doesn't
+   * need this mounted at all.
+   */
+  files?: Router;
 }
 
 export function createApp(routes: AppRoutes = {}): Express {
@@ -27,6 +34,7 @@ export function createApp(routes: AppRoutes = {}): Express {
 
   if (routes.webexInbound) app.use('/webhooks/webex-messaging', routes.webexInbound);
   if (routes.wxccOutbound) app.use('/webhooks/wxcc', routes.wxccOutbound);
+  if (routes.files) app.use('/files', routes.files);
 
   return app;
 }

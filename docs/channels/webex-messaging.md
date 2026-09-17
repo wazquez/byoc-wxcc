@@ -12,7 +12,13 @@
 - `src/channels/webex-messaging/manifest.ts` — channel metadata (ID, capabilities)
 
 **Declared capabilities:**
-- Attachments: **false** — this vertical slice implements text-only messaging. Full attachment support (file upload, MIME type detection, PCI/malware scanning correlation) is deferred.
+- Attachments: **true**. Inbound: each Webex `files[]` URL is downloaded (bot token) and
+  re-hosted via `FileRelay` (`src/core/files/relay.ts`) so WxCC can retrieve it
+  unauthenticated. Outbound: each `NormalizedAttachment.fileUrl` (a short-lived WxCC-signed
+  URL) is fetched via `FileRelay.fetch` and re-uploaded to Webex — one Webex message per
+  attachment, since Webex's send API takes only one file per message. See "Outbound" and
+  "Known limitations" below for what's still out of scope (encryption, >1 file per
+  *customer* message).
 
 ## Inbound: Webex Messaging to WxCC
 
@@ -34,8 +40,9 @@ See [`docs/webex-messaging-webhooks.md`](../webex-messaging-webhooks.md) for the
 
 1. **Extract IDs from the webhook envelope:** `messageId`, `roomId` (external conversation ID), `personId` (sender's Webex person ID).
 2. **Filter the bot's own echo** (`personId === botPersonId`) — every message the bot sends will fire a `messages/created` webhook; without this filter, the bot would talk to itself in a loop. This is a Webex-Messaging-specific safety mechanism, but the idea ("don't ingest your own echo") is a concern every channel adapter shares.
-3. **Fetch the decrypted message text** — **Webex end-to-end encrypts room content**, so the webhook envelope omits the text. Call `GET /v1/messages/{messageId}` with the bot token to retrieve the decrypted plaintext (and the sender's email). This is a Webex-Messaging-specific quirk, captured as a `TODO(attachments)` in the code — file attachments would require a further call to `GET /v1/messages/{messageId}/attachments` per file.
-4. **Normalize to `NormalizedInboundMessage`** — the core's orchestration expects a channel-agnostic shape with `externalConversationId` (roomId), `senderId`, `text`, `attachments` (empty, text-only), and `timestamp`.
+3. **Fetch the decrypted message text** — **Webex end-to-end encrypts room content**, so the webhook envelope omits the text. Call `GET /v1/messages/{messageId}` with the bot token to retrieve the decrypted plaintext, the sender's email, and — when the message carries files — the `files[]` array of content URLs.
+4. **Re-host any attachments** — each `files[]` entry is a Webex content URL gated by the bot token; WxCC has no Webex token, so it can't fetch these directly. For each URL: `client.getFileContent(url)` downloads the bytes (fileName/mimeType come from the response's `Content-Disposition`/`Content-Type` headers, not the message body), then `fileRelay.stage(...)` re-hosts it and returns a plain HTTPS URL WxCC *can* fetch. This re-hosting step is generic — any adapter bridging a token-gated platform to WxCC needs it (see `src/core/files/relay.ts`).
+5. **Normalize to `NormalizedInboundMessage`** — the core's orchestration expects a channel-agnostic shape with `externalConversationId` (roomId), `senderId`, `text`, `attachments` (populated per above, empty array if the message had none), and `timestamp`.
 
 ### Sender identity
 
@@ -63,7 +70,15 @@ by hand (Postman / Bruno / a script). See
 
 **Implementation:** `src/channels/webex-messaging/client.ts` → `POST /v1/messages`
 
-**Payload:** text content, sent to the target `roomId`. Attachments field is ignored (text-only).
+**Payload — text-only:** a plain JSON body `{roomId, text}`.
+
+**Payload — with attachments:** `NormalizedOutboundMessage.attachments[].fileUrl` is a
+short-lived, WxCC-**signed** URL (per docs/wxcc-byoc-custom-messaging.md) — it must be
+fetched promptly, not stored. The adapter calls `fileRelay.fetch(fileUrl)` to retrieve the
+bytes, then `client.sendMessage` uploads them via `multipart/form-data` (Webex's send API
+needs raw bytes here, not a URL it doesn't already trust). Webex accepts only **one file
+per message**, so an agent reply with N attachments becomes N Webex messages; the reply
+text (if any) rides along with the first attachment rather than as a separate message.
 
 ## Configuration
 
@@ -96,7 +111,18 @@ Webex Messaging webhook.
 
 ## Known limitations
 
-- **Attachments:** fully deferred (text-only vertical slice). Would require: (1) `NormalizedAttachment` schema extension, (2) file metadata fetching in `parseInboundEvent`, (3) file upload/download handling in both directions, and (4) correlation with WxCC's PCI/malware scanning events.
+- **Attachment encryption:** if the org enables Webex attachment-content encryption, WxCC's
+  outbound attachment URLs point at encrypted content and the Webex Decryption SDK would be
+  needed before re-upload. Not implemented — the demo org has encryption disabled, so this
+  path is untested. `fileRelay.fetch()` would need a decryption step inserted before the
+  bytes are handed to `client.sendMessage`.
+- **PCI/malware-drop correlation:** WxCC silently drops attachments that fail PCI or malware
+  scanning (only noted in the success webhook's `eventDetails`, not itemized). The adapter
+  doesn't currently surface this to the customer or agent.
+- **Staged-file lifetime/storage:** `LocalFileRelay` keeps staged files on local disk with a
+  30-minute TTL, in a single-instance in-memory index — fine for a demo, not for multiple
+  Cloud Run instances or long-lived attachments. See the `TODO(cloud-storage)` in
+  `local-file-relay.ts` for the swap-in replacement.
 - **Group rooms / @mention parsing:** the implementation assumes a 1:1 space (all messages visible to the bot). Group rooms would require parsing @mention syntax to distinguish "is the bot being addressed?" from general room chatter.
 - **Rate limiting:** not modeled. Real deployments should implement backoff for Webex API 429 (too many requests) responses.
 

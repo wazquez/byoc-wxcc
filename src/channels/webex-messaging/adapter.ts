@@ -9,11 +9,14 @@
 
 import type {
   ChannelAdapter,
+  NormalizedAttachment,
   NormalizedInboundMessage,
   NormalizedOutboundMessage,
   RawInboundRequest,
 } from '../../core/channel-adapter';
+import type { FileRelay } from '../../core/files/relay';
 import { config } from '../../config';
+import { LocalFileRelay } from '../../core/files/local-file-relay';
 import { verifyWebexMessagingSignature, WEBEX_SIGNATURE_HEADER } from './signature';
 import { WebexMessagingClient } from './client';
 import { webexMessagingManifest } from './manifest';
@@ -37,10 +40,18 @@ export interface WebexAdapterDeps {
   client: WebexMessagingClient;
   webhookSecret: string;
   channelId: string;
+  /**
+   * Bridges attachment bytes across the WxCC <-> Webex boundary (see
+   * src/core/files/relay.ts for the full rationale). Injected rather than
+   * constructed here so tests can supply a fake and so core owns the choice of
+   * backing store (local disk today, Cloud Storage later) — the adapter only
+   * ever calls the interface.
+   */
+  fileRelay: FileRelay;
 }
 
 export function createWebexMessagingAdapter(deps: WebexAdapterDeps): ChannelAdapter {
-  const { client, webhookSecret, channelId } = deps;
+  const { client, webhookSecret, channelId, fileRelay } = deps;
 
   function envelope(raw: RawInboundRequest): WebexWebhookEnvelope {
     return (raw.body ?? {}) as WebexWebhookEnvelope;
@@ -85,8 +96,26 @@ export function createWebexMessagingAdapter(deps: WebexAdapterDeps): ChannelAdap
       if (personId === botPersonId) return null;
 
       // WEBEX-SPECIFIC quirk (the reason this method is async): fetch the decrypted
-      // text — the webhook doesn't include it. This response also carries personEmail.
+      // text — the webhook doesn't include it. This response also carries personEmail
+      // and, when present, the `files` URLs (attachments; see below).
       const message = await client.getMessage(messageId);
+
+      // WEBEX-SPECIFIC: each files[] entry is a token-gated Webex content URL — WxCC
+      // has no Webex token, so it can't fetch these directly. Download the bytes here
+      // (we hold the bot token) and re-host via FileRelay so Create Task / Task
+      // Messages gets a plain HTTPS URL it can GET unauthenticated. GENERIC pattern:
+      // any adapter bridging a token-gated platform needs this same re-hosting step;
+      // a platform with already-public file URLs could skip straight to fileUrl.
+      const attachments: NormalizedAttachment[] = [];
+      for (const fileUrl of message.files ?? []) {
+        const file = await client.getFileContent(fileUrl);
+        const staged = await fileRelay.stage({
+          content: file.content,
+          fileName: file.fileName,
+          mimeType: file.mimeType,
+        });
+        attachments.push({ fileName: staged.fileName, mimeType: staged.mimeType, fileUrl: staged.url });
+      }
 
       return {
         externalConversationId: roomId,
@@ -95,9 +124,7 @@ export function createWebexMessagingAdapter(deps: WebexAdapterDeps): ChannelAdap
         // if the message has no email.
         senderId: message.personEmail ?? personId,
         text: message.text ?? '',
-        // TODO(attachments): Webex messages can carry `files`; the text-only vertical
-        // slice omits them. Fetching fileName/mimeType needs a further API call.
-        attachments: [],
+        attachments,
         timestamp: Date.parse(message.created) || 0,
       };
     },
@@ -107,15 +134,46 @@ export function createWebexMessagingAdapter(deps: WebexAdapterDeps): ChannelAdap
       message: NormalizedOutboundMessage,
     ): Promise<void> {
       // GENERIC intent (deliver the reply); WEBEX-SPECIFIC mechanics (POST /messages).
-      // Attachments deferred with the rest of the text-only slice.
-      await client.sendMessage(externalConversationId, message.text);
+      if (message.attachments.length === 0) {
+        await client.sendMessage(externalConversationId, message.text);
+        return;
+      }
+
+      // WEBEX-SPECIFIC: Webex's send API accepts exactly one file per message, so an
+      // agent reply with N attachments becomes N Webex messages. The text (if any)
+      // rides along with the FIRST attachment rather than as its own message, so a
+      // "here's the doc" + one PDF reply shows as one bubble with the file, not two.
+      // GENERIC step underneath: message.attachments[].fileUrl is a WxCC-signed URL
+      // per docs/wxcc-byoc-custom-messaging.md — it must be fetched now, before it
+      // expires (FileRelay.fetch), then re-uploaded as bytes (any adapter bridging to
+      // a platform that can't consume that signed URL directly needs the same step).
+      for (const [i, attachment] of message.attachments.entries()) {
+        const content = await fileRelay.fetch(attachment.fileUrl);
+        await client.sendMessage(externalConversationId, i === 0 ? message.text : '', {
+          content,
+          fileName: attachment.fileName,
+          mimeType: attachment.mimeType,
+        });
+      }
     },
   };
 }
+
+/**
+ * The FileRelay this adapter re-hosts attachments through, exported so server.ts
+ * can mount `filesRoute(webexMessagingFileRelay)` at `/files` — it MUST be the
+ * same instance the adapter stages files into, or a staged URL would 404 (the
+ * route and the relay share an in-memory index; see local-file-relay.ts). Owned
+ * here, next to the adapter that uses it, rather than in server.ts, so adding a
+ * second channel later doesn't require server.ts to know each adapter's storage
+ * choice — each channel module owns and exports its own relay instance.
+ */
+export const webexMessagingFileRelay = new LocalFileRelay({ publicBaseUrl: config.publicBaseUrl });
 
 /** Default instance wired to real config — this is what the registry registers. */
 export const webexMessagingAdapter = createWebexMessagingAdapter({
   client: new WebexMessagingClient(config.webexMessaging.botToken),
   webhookSecret: config.webexMessaging.webhookSecret,
   channelId: webexMessagingManifest.channelId,
+  fileRelay: webexMessagingFileRelay,
 });

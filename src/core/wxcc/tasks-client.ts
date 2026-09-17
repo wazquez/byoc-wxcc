@@ -17,12 +17,20 @@
 // returns the taskId; lifecycle confirmation is a separate concern.
 
 import type { WxccTokenManager } from './token-manager';
+import type { NormalizedAttachment } from '../channel-adapter';
 
-/** One normalized message going into WxCC (inbound direction). Text-only for the slice. */
+/**
+ * One normalized message going into WxCC (inbound direction: Create Task / Task
+ * Messages). `attachments` uses the SAME `NormalizedAttachment` shape core passes
+ * around everywhere else (`{fileName, mimeType, fileUrl}`) — the mapping to WxCC's
+ * wire field names happens once, inside `toChannelParams()` below.
+ */
 export interface WxccOutboundMessagePayload {
   aliasId: string;
   text: string;
   timestamp: number;
+  /** Omit or leave empty for a text-only message. */
+  attachments?: NormalizedAttachment[];
 }
 
 export interface CreateTaskParams {
@@ -35,6 +43,36 @@ export interface CreateTaskParams {
   /** Custom Messaging channel name as configured in Control Hub. */
   channel: string;
   message: WxccOutboundMessagePayload;
+}
+
+/**
+ * Builds the `channelParams` object shared by Create Task and Append Message.
+ * `type` MUST be `"text-with-attachments"` whenever attachments are present — a
+ * plain `"text"` message with a populated `attachments` array is rejected by WxCC
+ * (docs/wxcc-byoc-custom-messaging.md "Message type validation checks"). Message
+ * fields happen to match `NormalizedAttachment`'s shape 1:1 here (`fileName`,
+ * `mimeType`, `fileUrl`) — INBOUND-only; WxCC's OUTBOUND webhook uses different
+ * field names (`url` instead of `fileUrl`), mapped separately in the orchestrator.
+ */
+function toChannelParams(message: WxccOutboundMessagePayload): {
+  type: 'text' | 'text-with-attachments';
+  message: {
+    aliasId: string;
+    text: string;
+    timestamp: number;
+    attachments?: NormalizedAttachment[];
+  };
+} {
+  const hasAttachments = Boolean(message.attachments?.length);
+  return {
+    type: hasAttachments ? 'text-with-attachments' : 'text',
+    message: {
+      aliasId: message.aliasId,
+      text: message.text,
+      timestamp: message.timestamp,
+      ...(hasAttachments ? { attachments: message.attachments } : {}),
+    },
+  };
 }
 
 export class WxccTasksClient {
@@ -54,14 +92,7 @@ export class WxccTasksClient {
       destination: { id: params.destinationId, type: 'businessAddress' },
       channelType: 'customMessaging',
       channel: params.channel,
-      channelParams: {
-        type: 'text',
-        message: {
-          aliasId: params.message.aliasId,
-          text: params.message.text,
-          timestamp: params.message.timestamp,
-        },
-      },
+      channelParams: toChannelParams(params.message),
     };
     const res = await this.request<{ data?: { id?: string } }>('POST', '/v2/tasks', body);
     const taskId = res?.data?.id;
@@ -73,10 +104,7 @@ export class WxccTasksClient {
   async appendMessage(taskId: string, message: WxccOutboundMessagePayload): Promise<void> {
     const body = {
       mediaType: 'customMessaging',
-      channelParams: {
-        type: 'text',
-        message: { aliasId: message.aliasId, text: message.text, timestamp: message.timestamp },
-      },
+      channelParams: toChannelParams(message),
     };
     // NOTE: create is confirmed at /v2/tasks; append/end are aligned to /v2 for
     // consistency but not yet verified live — the first append (message #2 in a

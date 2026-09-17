@@ -13,7 +13,8 @@ import { InMemoryTokenStore, WxccTokenManager } from './core/wxcc/token-manager'
 import { WxccTasksClient } from './core/wxcc/tasks-client';
 import { Orchestrator } from './core/orchestration/orchestrator';
 import { wxccWebhookRoute } from './core/webhooks/route';
-import { webexMessagingAdapter } from './channels/webex-messaging/adapter';
+import { filesRoute } from './core/files';
+import { webexMessagingAdapter, webexMessagingFileRelay } from './channels/webex-messaging/adapter';
 import { webexMessagingWebhookRoute } from './channels/webex-messaging/webhook-route';
 
 function buildOrchestrator(): Orchestrator {
@@ -50,6 +51,14 @@ function main(): void {
       secret: config.wxcc.assetWebhookSecret,
       onOutboundEvent: orchestrator.handleOutboundEvent,
     }),
+    // Serves attachment bytes the Webex adapter staged via FileRelay (see
+    // src/core/files/relay.ts). The relay instance is OWNED by the adapter module
+    // (webexMessagingFileRelay), not built here — it must be the exact instance
+    // adapter.ts calls stage() on, or a staged URL would 404. With a single
+    // channel, mounting one relay at /files is unambiguous; a second channel with
+    // its own relay would need its own path prefix (e.g. /files/teams) rather than
+    // sharing this mount.
+    files: filesRoute(webexMessagingFileRelay),
   });
 
   app.listen(config.port, '0.0.0.0', () => {

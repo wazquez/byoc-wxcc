@@ -132,6 +132,12 @@ without modifying the WxCC integration. Full contract and rationale:
 - Webex Messaging is the first (reference) implementation. Build it, then verify the
   boundary actually holds by checking the "adding a new channel" checklist in
   `docs/architecture-multi-channel.md` requires zero changes to `src/core/`.
+- **Attachments follow the same split:** `FileRelay` (`src/core/files/`) is core-provided
+  shared plumbing (re-hosting bytes across the WxCC <-> channel boundary), but *whether
+  and how* an adapter uses it is a per-channel policy decision — see
+  `docs/architecture-multi-channel.md` → "Attachments across channels" before building
+  attachment support for a new channel. Do not assume the Webex adapter's specific
+  choices (stage every file, one file per outbound message, multipart upload) generalize.
 
 ## Webhook verification & auth (all resolved)
 
@@ -221,6 +227,15 @@ file — the rest of the codebase depends only on its interface.
 - ✅ Outbound: Agent reply → WxCC webhook → middleware → delivered back into Webex space.
 - ✅ Task lifecycle: When a task ends, old correlation is cleared; next message from same
   customer creates a new task (no server restart required).
+- ✅ Attachments (both directions): a `FileRelay` (`src/core/files/relay.ts`, core —
+  every channel will need this, not just Webex Messaging) re-hosts file bytes across
+  the WxCC ↔ channel boundary, since neither side's URLs are usable by the other
+  (Webex's are bot-token-gated; WxCC's outbound URLs are short-lived signed URLs).
+  `LocalFileRelay` (disk + in-memory index, TTL'd, single-instance) is the first-slice
+  implementation, served via `GET /files/:id`; swapping to Cloud Storage later is a
+  drop-in replacement. Known deferral: attachment **encryption** (Webex Decryption
+  SDK) is not implemented — the demo org has it disabled, so this is untested, not
+  unneeded.
 
 **Subscription events — received & logged, not provisioned by this app:**
 - The `/webhooks/wxcc` route accepts BOTH delivery paths on one URL: the asset-level

@@ -136,8 +136,23 @@ What follows is the layer *around* that checklist: how to actually execute it, e
    - Test: `npm run typecheck && npm test`
    - Implement `sendOutboundMessage` (call your platform's message-send API to deliver replies back)
    - Test: `npm run typecheck && npm test`
+   - **If your platform supports attachments**, implement that last, as its own step:
+     - Inbound: does your platform's file URL need a credential WxCC doesn't have? If
+       so, download the bytes and call `fileRelay.stage(...)` (`src/core/files/relay.ts`)
+       to get a URL WxCC can fetch unauthenticated; if your platform's URLs are already
+       public, skip staging and use them as `fileUrl` directly.
+     - Outbound: `NormalizedAttachment.fileUrl` on the outbound path is a short-lived
+       WxCC-signed URL — fetch it via `fileRelay.fetch(...)` promptly, then upload the
+       bytes however your platform's send API expects.
+     - **Don't copy the Webex adapter's specific choices** (stage every file, one file
+       per outbound message, multipart upload) — those follow from Webex Messaging's
+       own API limits, not from anything core requires. Decide your own policy per your
+       platform's actual constraints. See "Attachments across channels" in
+       [`architecture-multi-channel.md`](architecture-multi-channel.md) before writing
+       this step.
+     - Test: `npm run typecheck && npm test`
 
-4. **Fill in the manifest** (`manifest.ts`): set `channelId` to your platform name (must match the Control Hub channel name), and declare `capabilities` (text, attachments, etc.) honestly.
+4. **Fill in the manifest** (`manifest.ts`): set `channelId` to your platform name (must match the Control Hub channel name), and declare `capabilities` honestly — `attachments: true` only once inbound staging and outbound upload are actually implemented and tested, not just because the platform itself supports files.
 
 5. **Register in `src/core/registry.ts`:** one `import` line + one `registerChannel(...)` call. See the Webex example in that file.
 
@@ -174,6 +189,9 @@ Write your own `docs/channels/<your-channel>.md` decisions section. For example,
 - One complete message round-trip works end-to-end: customer message in your platform → task created in WxCC → agent reply → webhook received by middleware → reply delivered back to the customer in your platform.
 - `npm run dev` followed by `curl localhost:8080/healthz` returns `{"status":"ok"}`.
 - `docs/channels/<your-channel>.md` is complete and honest about limitations.
+- `capabilities.attachments` matches reality: `false` is a perfectly fine, honest state
+  if you haven't built attachment support yet — don't set it `true` because the
+  platform can do it if the adapter can't yet.
 
 ## Troubleshooting
 
@@ -193,6 +211,14 @@ left pointing at an old public URL after you rotated the tunnel/domain — it ke
 with an old secret. Fix: list your subscriptions (Postman/Bruno), delete or re-point the
 stale ones, and update the asset webhook URL too. See
 [`wxcc-webhooks-cc.md`](wxcc-webhooks-cc.md) → "Provisioning subscriptions".
+
+**Attachment URLs return 404 (if you're using `LocalFileRelay`):**
+`LocalFileRelay.stage()` and the `GET /files/:id` route that serves it share an
+in-memory index — they only work if they're the SAME instance. Construct your
+channel's `LocalFileRelay` once, in your adapter module (export it, following
+`webexMessagingFileRelay` in `src/channels/webex-messaging/adapter.ts`), and have
+`server.ts` mount `filesRoute(...)` on that exact exported instance — never construct
+a second `LocalFileRelay` for the route.
 
 ## See also
 

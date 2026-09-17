@@ -47,6 +47,26 @@ describe('WxccTasksClient', () => {
     });
   });
 
+  it('sends channelParams.type "text-with-attachments" when attachments are present', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: { id: 'task-456' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new WxccTasksClient(BASE, tokenManager());
+    const attachments = [{ fileName: 'order.pdf', mimeType: 'application/pdf', fileUrl: 'https://relay.example/files/1' }];
+    await client.createTask({
+      originId: 'customer-1',
+      destinationId: 'webex-messaging',
+      channel: 'Webex-messaging',
+      message: { aliasId: 'a1', text: 'see attached', timestamp: 111, attachments },
+    });
+
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.channelParams).toMatchObject({
+      type: 'text-with-attachments',
+      message: { aliasId: 'a1', text: 'see attached', attachments },
+    });
+  });
+
   it('appends a message to the correct task path', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: { id: 'a2' } }));
     vi.stubGlobal('fetch', fetchMock);

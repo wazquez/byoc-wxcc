@@ -59,6 +59,11 @@ as its URL and `WXCC_ASSET_WEBHOOK_SECRET` as its `secret`. See
 for the event list and gotchas (especially: re-point every subscription when your
 public URL changes).
 
+**One more thing to set:** `PUBLIC_BASE_URL` in `.env` — this process's own public
+HTTPS URL (the same host as the webhooks above, no trailing slash). It's used to build
+attachment URLs under `/files/:id` that WxCC (and the channel platform) can retrieve;
+required for attachment support to work, unused otherwise.
+
 ### 5. Deployment
 
 For local testing: `npm run dev` (live reload with tsx watch)
@@ -84,7 +89,8 @@ src/
 │   ├── orchestration/          # Inbound/outbound state machine
 │   ├── wxcc/                   # WxCC Tasks API & token management (no Subscriptions client)
 │   ├── webhooks/               # /webhooks/wxcc receiver — asset webhook + subscription events
-│   └── state/                  # Correlation store (in-memory stub)
+│   ├── state/                  # Correlation store (in-memory stub)
+│   └── files/                  # FileRelay — re-hosts attachment bytes across the WxCC<->channel boundary
 ├── channels/          # Channel implementations (one per platform)
 │   ├── webex-messaging/        # Reference implementation
 │   └── _channel-template/      # Copy this to add a new channel
@@ -133,7 +139,7 @@ See [`docs/adding-a-new-channel.md`](docs/adding-a-new-channel.md) for the step-
 
 ## Status
 
-**Demo/reference only** — not production-hardened. The vertical slice (one message round-trip end-to-end) is complete and tested. Known deferral: text-only messaging (attachments are explicitly not yet implemented).
+**Demo/reference only** — not production-hardened. The vertical slice (one message round-trip end-to-end, text and file attachments) is complete and tested. Known deferrals: attachment encryption (the demo org has it disabled — see `docs/channels/webex-messaging.md` "Known limitations") and a persistent/shared correlation and file-staging store (both are in-memory, single-instance).
 
 ## License
 

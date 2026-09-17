@@ -19,8 +19,13 @@ export const webexMessagingManifest = {
   channelId: config.webexMessaging.channelName,
 
   /**
-   * Webex Messaging supports file attachments, so this channel advertises them.
-   * (Set honestly per channel — don't claim attachment support you haven't built.)
+   * Inbound: parseInboundEvent downloads each Webex `files[]` URL and re-hosts it
+   * via FileRelay so WxCC can retrieve it unauthenticated. Outbound: sendOutboundMessage
+   * fetches WxCC's signed attachment URL and re-uploads it to Webex (one Webex
+   * message per attachment — Webex's send API takes only one file per message).
+   * This flag reflects what the ADAPTER does, not just what the platform can do —
+   * see adapter.ts and "Known limitations" in docs/channels/webex-messaging.md for
+   * what's still out of scope (attachment encryption, >1 file per customer message).
    */
   capabilities: { attachments: true },
 } as const;

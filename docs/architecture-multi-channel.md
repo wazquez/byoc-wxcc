@@ -43,6 +43,7 @@ src/
                      #    same /webhooks/wxcc route)
     webhooks/         # WxCC outbound webhook receiver + its signature verification
     state/            # Correlation store (interface + implementation), channel-agnostic
+    files/            # FileRelay (interface + implementation) — see "Attachments across channels" below
     orchestration/     # Inbound-event handler, outbound-event dispatcher, task lifecycle
     channel-adapter.ts # The ChannelAdapter interface/contract (see below)
     registry.ts       # Registers every channel adapter so core can dispatch to it
@@ -78,6 +79,9 @@ ChannelAdapter {
 
   // Capability flags core/orchestration can check before acting
   // (e.g. skip attachment handling entirely for a channel that doesn't support it).
+  // Must reflect what THIS ADAPTER implements, not just what the platform can do —
+  // see "Attachments across channels" below for what attachment support does and
+  // doesn't require.
   capabilities: { attachments: boolean }
 
   // --- Inbound direction ---
@@ -113,6 +117,60 @@ speaks — roughly `{ text, attachments[], senderId, timestamp }` — defined on
 `src/core/channel-adapter.ts`, reused by every channel. A new channel adapter's whole
 job is translating to/from this shape and its own platform's API.
 
+## Attachments across channels: shared plumbing, per-channel policy
+
+Both `NormalizedInboundMessage.attachments` and `NormalizedOutboundMessage.attachments`
+are `NormalizedAttachment[]` — `{ fileName, mimeType, fileUrl }` — the SAME shape
+regardless of channel, defined once in `src/core/channel-adapter.ts`. That shape, and
+the `FileRelay` interface described below, are the only things about attachments that
+are fixed across every channel. Everything else is a per-adapter decision.
+
+**The problem `FileRelay` solves:** WxCC and an external messaging platform never hand
+each other file bytes directly — only URLs — and a URL usable by one side is often
+useless to the other:
+
+- Create Task / Task Messages requires attachment URLs to be plain HTTPS, fetchable
+  with **no additional authentication**, and to have a determinable size (see
+  `docs/wxcc-byoc-custom-messaging.md` → "Attachment URL Requirements"). Many
+  platforms' own file URLs are gated behind a bot/app credential the platform issues —
+  WxCC has no way to present that credential, so it can't fetch such a URL directly.
+- Symmetrically, WxCC's OUTBOUND attachment URLs (in the `task-message:appended`
+  webhook) are short-lived, **signed** URLs meant to be fetched once, promptly — not
+  something to hand unchanged to a platform's send API, which likely can't consume an
+  arbitrary external signed URL anyway.
+
+`FileRelay` (`src/core/files/relay.ts`) is core's answer: `stage(bytes) -> url`
+re-hosts bytes the middleware currently holds at a URL WxCC can fetch unauthenticated;
+`fetch(url) -> bytes` retrieves bytes from any URL (typically WxCC's signed one) before
+an adapter re-uploads them to its platform. It's core, not per-adapter, because *any*
+channel bridging a credential-gated platform to WxCC needs the same bridge — see
+`src/channels/webex-messaging/adapter.ts` for the reference usage (it downloads every
+inbound file and stages it; it fetches every outbound WxCC URL and re-uploads it).
+
+**What is NOT fixed, and must be decided per adapter, per platform:**
+
+- **Whether staging is needed at all.** A platform whose own file URLs are already
+  plain, publicly-fetchable HTTPS could hand WxCC that URL directly as `fileUrl` and
+  skip `FileRelay.stage()` entirely. Only call `stage()` when the platform's URL
+  genuinely isn't something WxCC can fetch on its own.
+- **How many attachments fit in one outbound platform message.** The reference
+  implementation sends at most one file per platform message (a Webex Messaging
+  API limit) and splits N attachments into N messages, with the reply text riding
+  along with the first. A platform whose send API accepts multiple attachments per
+  message wouldn't need to split at all — don't copy the splitting logic unless your
+  platform has the same one-file limit.
+- **The actual upload/download mechanics.** The reference implementation downloads
+  via an authenticated GET and uploads via `multipart/form-data`, because that's what
+  the Webex Messaging API needs. A different platform's API may need a completely
+  different mechanism (e.g. upload-then-reference-by-URL, inline encoding, etc.) —
+  whatever it is, it stays inside that adapter, never in core.
+
+**Bottom line:** copy the *pattern* (call `FileRelay` where your platform's URLs need
+re-hosting; produce/consume `NormalizedAttachment[]`), not the Webex adapter's specific
+policy choices (stage-everything, one-file-per-message, multipart upload). Those
+choices exist because of Webex Messaging's specific API constraints, not because core
+requires them.
+
 ## State store requirement (regardless of engine — engine still TBD)
 
 Every correlation record needs, at minimum:
@@ -134,6 +192,9 @@ exists for one channel, is exactly the kind of retrofit this design is meant to 
    and `sendOutboundMessage` for the new platform's API.
 3. Set `channelId` to match the channel name you configure in WxCC Control Hub, and
    set `capabilities` honestly (don't claim attachment support if you haven't built it).
+   If you do build attachment support, read "Attachments across channels" above first —
+   `FileRelay` is available to you, but whether/how to use it is your platform's call,
+   not a copy of the Webex adapter's specific choices.
 4. Register the adapter in `src/core/registry.ts` (one line — core does not otherwise change).
 5. Add the new channel's own credentials to `.env.example` (never commit real values).
 6. Add `docs/channels/<new-channel>.md` documenting that platform's webhook payload
