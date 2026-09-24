@@ -100,6 +100,13 @@ export function createWebexMessagingAdapter(deps: WebexAdapterDeps): ChannelAdap
       // and, when present, the `files` URLs (attachments; see below).
       const message = await client.getMessage(messageId);
 
+      // WEBEX-SPECIFIC: neither the webhook nor GET /v1/messages/{id} exposes a
+      // display name — only a separate People API call does. GENERIC concern
+      // underneath (any channel might have a customer display name); this is the
+      // Webex-specific way of getting one. Cached per personId in the client, so
+      // this doesn't mean a fresh API call on every message in a conversation.
+      const senderName = await client.getPersonDisplayName(personId);
+
       // WEBEX-SPECIFIC: each files[] entry is a token-gated Webex content URL — WxCC
       // has no Webex token, so it can't fetch these directly. Download the bytes here
       // (we hold the bot token) and re-host via FileRelay so Create Task / Task
@@ -123,6 +130,7 @@ export function createWebexMessagingAdapter(deps: WebexAdapterDeps): ChannelAdap
         // origin.id). A raw personId URN routes/displays poorly; fall back to it only
         // if the message has no email.
         senderId: message.personEmail ?? personId,
+        senderName,
         text: message.text ?? '',
         attachments,
         timestamp: Date.parse(message.created) || 0,

@@ -9,7 +9,7 @@ const BOT_ID = 'bot-person-id';
 
 // Minimal fake of WebexMessagingClient — no network. Casts through unknown because
 // the adapter only uses these methods.
-function fakeClient(text: string, personEmail?: string, files?: string[]) {
+function fakeClient(text: string, personEmail?: string, files?: string[], displayName?: string) {
   return {
     getBotPersonId: async () => BOT_ID,
     getMessage: async (id: string) => ({
@@ -26,6 +26,7 @@ function fakeClient(text: string, personEmail?: string, files?: string[]) {
       fileName: fileUrl.includes('order') ? 'order.pdf' : 'attachment',
       mimeType: 'application/pdf',
     }),
+    getPersonDisplayName: async () => displayName,
     sendMessage: async () => {},
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
@@ -49,9 +50,10 @@ function makeAdapter(
   personEmail?: string,
   files?: string[],
   fileRelay: FileRelay = fakeFileRelay(),
+  displayName?: string,
 ) {
   return createWebexMessagingAdapter({
-    client: fakeClient(text, personEmail, files),
+    client: fakeClient(text, personEmail, files, displayName),
     webhookSecret: SECRET,
     channelId: 'webex-messaging',
     fileRelay,
@@ -104,6 +106,19 @@ describe('WebexMessagingAdapter inbound', () => {
   it('falls back to personId as senderId when the message has no email', async () => {
     const msg = await makeAdapter('hi').parseInboundEvent(rawFor(messageCreated));
     expect(msg?.senderId).toBe('customer-1');
+  });
+
+  it('fetches the customer display name via the People API', async () => {
+    const relay = fakeFileRelay();
+    const msg = await makeAdapter('hi', undefined, undefined, relay, 'Jane Customer').parseInboundEvent(
+      rawFor(messageCreated),
+    );
+    expect(msg?.senderName).toBe('Jane Customer');
+  });
+
+  it('leaves senderName undefined when the platform has none to give', async () => {
+    const msg = await makeAdapter('hi').parseInboundEvent(rawFor(messageCreated));
+    expect(msg?.senderName).toBeUndefined();
   });
 
   it('ignores the bot\'s own messages (no echo loop)', async () => {

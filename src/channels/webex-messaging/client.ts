@@ -35,6 +35,11 @@ export interface WebexFileContent {
   mimeType: string;
 }
 
+/** Shape of GET /v1/people/{id} (only the field we use). */
+export interface WebexPerson {
+  displayName?: string;
+}
+
 export class WebexMessagingClient {
   constructor(private readonly botToken: string) {}
 
@@ -106,6 +111,20 @@ export class WebexMessagingClient {
     return this.botPersonId;
   }
   private botPersonId?: string;
+
+  /**
+   * The customer's display name. Neither the inbound webhook nor GET /v1/messages/{id}
+   * carries this — both only ever expose personId/personEmail — so a separate People
+   * API call is required. Cached per personId (mirrors the bot-person-id cache above)
+   * so a chatty conversation doesn't re-fetch the same customer's name on every message.
+   */
+  async getPersonDisplayName(personId: string): Promise<string | undefined> {
+    if (this.displayNameCache.has(personId)) return this.displayNameCache.get(personId);
+    const person = await this.request<WebexPerson>(`/people/${encodeURIComponent(personId)}`);
+    this.displayNameCache.set(personId, person.displayName);
+    return person.displayName;
+  }
+  private readonly displayNameCache = new Map<string, string | undefined>();
 
   private async request<T = unknown>(
     path: string,

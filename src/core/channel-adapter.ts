@@ -48,6 +48,14 @@ export interface NormalizedInboundMessage {
   externalConversationId: string;
   /** The customer-visible identifier of who sent it (Webex personId/email, etc.). */
   senderId: string;
+  /**
+   * The customer's human-readable display name, if the platform exposes one and the
+   * adapter fetched it — becomes WxCC's `origin.name` (Create Task only; there's no
+   * append-time equivalent). Optional: not every platform has a separate display
+   * name, and an adapter that doesn't bother fetching one just omits it — core falls
+   * back to `senderId` either way (see WxccTasksClient's `origin.name` default).
+   */
+  senderName?: string;
   /** Message text. May be empty string when the message is attachments-only. */
   text: string;
   /** Zero or more attachments (empty array when the platform/message has none). */

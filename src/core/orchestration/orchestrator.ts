@@ -110,6 +110,9 @@ export class Orchestrator {
       );
       const taskId = await tasksClient.createTask({
         originId: message.senderId,
+        // Only meaningful on create — WxCC's Append Message has no origin/name
+        // field, so senderName is simply unused on the append path below.
+        originName: message.senderName,
         destinationId: businessAddress,
         channel,
         message: payload,

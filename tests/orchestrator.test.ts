@@ -57,6 +57,15 @@ describe('Orchestrator inbound', () => {
     });
   });
 
+  it('forwards senderName as originName on create (falls back to undefined -> originId in the client)', async () => {
+    const { orch, tasksClient } = setup();
+    await orch.handleInboundMessage('webex-messaging', inbound({ text: 'first', senderName: 'Jane Customer' }));
+
+    expect(tasksClient.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ originId: 'customer-1', originName: 'Jane Customer' }),
+    );
+  });
+
   it('appends to the existing task on subsequent messages (no second createTask)', async () => {
     const { orch, tasksClient } = setup();
     await orch.handleInboundMessage('webex-messaging', inbound({ text: 'first' }));
