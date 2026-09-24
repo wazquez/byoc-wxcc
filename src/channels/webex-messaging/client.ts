@@ -11,6 +11,15 @@
 
 const WEBEX_API_BASE = 'https://webexapis.com/v1';
 
+// WEBEX-SPECIFIC: a just-uploaded file can still be mid malware/virus scan when the
+// messages/created webhook arrives — Webex's content endpoint returns 423 Locked
+// for the file until that scan finishes (usually a few seconds). It's a race, not
+// an error, so getFileContent() retries on 423 specifically before giving up. Safe
+// to spend a few seconds here: this runs in the webhook route's fire-and-forget
+// processing, AFTER the 202 ack, so there's no response-time deadline to respect.
+const SCAN_LOCK_MAX_RETRIES = 4;
+const SCAN_LOCK_RETRY_BASE_MS = 1000; // doubles each attempt: 1s, 2s, 4s, 8s (~15s worst case)
+
 /** Shape of GET /v1/messages/{id} (only the fields we use). */
 export interface WebexMessage {
   id: string;
@@ -40,8 +49,20 @@ export interface WebexPerson {
   displayName?: string;
 }
 
+export interface WebexMessagingClientOptions {
+  /** Injectable delay, so tests exercise the 423 retry loop without real waiting. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
 export class WebexMessagingClient {
-  constructor(private readonly botToken: string) {}
+  private readonly sleep: (ms: number) => Promise<void>;
+
+  constructor(
+    private readonly botToken: string,
+    options: WebexMessagingClientOptions = {},
+  ) {
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  }
 
   /**
    * Fetch a message's decrypted text. Called from the adapter's parseInboundEvent
@@ -58,7 +79,12 @@ export class WebexMessagingClient {
    * `Content-Type`), which is why fetching each file needs its own request.
    */
   async getFileContent(fileUrl: string): Promise<WebexFileContent> {
-    const res = await fetch(fileUrl, { headers: { Authorization: `Bearer ${this.botToken}` } });
+    let res: Response;
+    for (let attempt = 0; ; attempt++) {
+      res = await fetch(fileUrl, { headers: { Authorization: `Bearer ${this.botToken}` } });
+      if (res.status !== 423 || attempt >= SCAN_LOCK_MAX_RETRIES) break;
+      await this.sleep(SCAN_LOCK_RETRY_BASE_MS * 2 ** attempt);
+    }
     if (!res.ok) {
       throw new Error(`Webex file download failed: ${res.status} ${fileUrl}`);
     }
