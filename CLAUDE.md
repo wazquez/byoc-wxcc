@@ -236,6 +236,11 @@ file — the rest of the codebase depends only on its interface.
   drop-in replacement. Known deferral: attachment **encryption** (Webex Decryption
   SDK) is not implemented — the demo org has it disabled, so this is untested, not
   unneeded.
+- ✅ Customer display name: `origin.name` on Create Task is populated from Webex's
+  People API (`GET /v1/people/{personId}`) — neither the webhook nor `GET /v1/messages/{id}`
+  exposes a display name, only `personId`/`personEmail`. Cached per `personId` in
+  `WebexMessagingClient`; create-only (Append Message has no origin field). Falls back
+  to `senderId` (email) when absent — see `NormalizedInboundMessage.senderName`.
 
 **Subscription events — received & logged, not provisioned by this app:**
 - The `/webhooks/wxcc` route accepts BOTH delivery paths on one URL: the asset-level
@@ -270,6 +275,12 @@ file — the rest of the codebase depends only on its interface.
 - `npm run lint` — ESLint (`npm run lint:fix` to autofix)
 - `npm test` — run tests once (vitest); `npm run test:watch` for watch mode
 - Docker (Cloud Run parity): `docker build -t wxcc-byoc .` then
-  `docker run -p 8080:8080 --env-file .env wxcc-byoc`
+  `docker run -p 8080:8080 --env-file .env wxcc-byoc` (or `podman` — same commands,
+  a Docker Desktop license isn't required)
+- `npm run deploy:gcp` — build, tag, push, and deploy to Cloud Run in one command
+  (`scripts/deploy-cloud-run.sh`). Must build `--platform linux/amd64` even on
+  Apple Silicon — Cloud Run doesn't run arm64 images. GCP project/region/service
+  names are deployer-specific, kept out of the committed script, read from `.env`'s
+  "Deploy tooling" section (see `.env.example`) with fallback defaults if unset.
 
 Health check for a running instance: `GET /healthz` → `{"status":"ok"}`.

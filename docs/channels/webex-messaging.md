@@ -42,11 +42,14 @@ See [`docs/webex-messaging-webhooks.md`](../webex-messaging-webhooks.md) for the
 2. **Filter the bot's own echo** (`personId === botPersonId`) — every message the bot sends will fire a `messages/created` webhook; without this filter, the bot would talk to itself in a loop. This is a Webex-Messaging-specific safety mechanism, but the idea ("don't ingest your own echo") is a concern every channel adapter shares.
 3. **Fetch the decrypted message text** — **Webex end-to-end encrypts room content**, so the webhook envelope omits the text. Call `GET /v1/messages/{messageId}` with the bot token to retrieve the decrypted plaintext, the sender's email, and — when the message carries files — the `files[]` array of content URLs.
 4. **Re-host any attachments** — each `files[]` entry is a Webex content URL gated by the bot token; WxCC has no Webex token, so it can't fetch these directly. For each URL: `client.getFileContent(url)` downloads the bytes (fileName/mimeType come from the response's `Content-Disposition`/`Content-Type` headers, not the message body), then `fileRelay.stage(...)` re-hosts it and returns a plain HTTPS URL WxCC *can* fetch. This re-hosting step is generic — any adapter bridging a token-gated platform to WxCC needs it (see `src/core/files/relay.ts`).
-5. **Normalize to `NormalizedInboundMessage`** — the core's orchestration expects a channel-agnostic shape with `externalConversationId` (roomId), `senderId`, `text`, `attachments` (populated per above, empty array if the message had none), and `timestamp`.
+   - **Quirk: `423 Locked`.** A just-uploaded file can still be mid malware/virus scan when the webhook arrives; Webex's content endpoint returns `423` until that finishes (usually a few seconds — longer for bigger files, which is why small attachments tend to work on the first try and larger ones don't). `getFileContent` retries on `423` specifically, exponential backoff (1s/2s/4s/8s, ~15s worst case) before giving up — safe to spend that time since this runs in the webhook route's fire-and-forget processing, after the `202` ack.
+5. **Normalize to `NormalizedInboundMessage`** — the core's orchestration expects a channel-agnostic shape with `externalConversationId` (roomId), `senderId`, `senderName`, `text`, `attachments` (populated per above, empty array if the message had none), and `timestamp`.
 
 ### Sender identity
 
 The `senderId` sent to WxCC's Create Task becomes the `origin.id`. This implementation prefers the sender's **email address** (fetched in the same message-text API call) over the raw Webex `personId` URN — emails display better to agents and route more intuitively. Falls back to the personId only if the message has no email field.
+
+`senderName` (becomes `origin.name`) is fetched separately via `client.getPersonDisplayName(personId)` — `GET /v1/people/{personId}` — since neither the webhook nor `GET /v1/messages/{id}` exposes a display name. Cached per `personId` in the client so a chatty conversation doesn't re-fetch it every message. Create-only: Append Message has no origin field, so this only matters for the first message in a conversation.
 
 ### Conversation mapping
 
