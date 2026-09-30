@@ -19,7 +19,8 @@ I need to understand:
 - The API to send replies back to users
 - Any quirks (rate limits, encoding, message size limits, etc.)
 
-Create a spec-capture document shaped like `docs/webex-messaging-webhooks.md` with:
+Create a spec-capture document shaped like `docs/webex-messaging-webhooks.md`, saved
+at `docs/<platform-slug>-webhooks.md` (e.g. `docs/teams-webhooks.md` for Teams), with:
 - Source URL and capture date
 - Concrete JSON examples of the webhook envelope
 - Signature verification scheme details
@@ -50,7 +51,7 @@ adapter method is left as a `TODO` for Phase 2 below.
 ```
 I'm implementing [PLATFORM] support for this WxCC middleware.
 
-Here's the [PLATFORM] webhook spec I researched: [paste the spec or reference the doc].
+Here's the [PLATFORM] webhook spec I researched: `docs/[platform-slug]-webhooks.md`.
 
 Here's the reference implementation: src/channels/webex-messaging/
 Here's the reference documentation: docs/channels/webex-messaging.md
@@ -88,7 +89,8 @@ Read your platform's webhook/API documentation and extract:
 
 Ideally, trigger a real webhook and capture a concrete JSON example (or copy one from the platform's docs). Write down your findings in plain text or notes.
 
-**Can't find the right docs?** Claude Code can help with this research phase too. Say something like: "I'm adding [platform] support. Help me find the webhook documentation and extract: the webhook JSON schema, signature verification scheme, text fetch API, and send API. Create a spec-capture doc shaped like `docs/webex-messaging-webhooks.md`." Claude Code will search, read, and synthesize the information for you.
+**Can't find the right docs?** Claude Code can help with this research phase too. Say something like: "I'm adding [platform] support. Help me find the webhook documentation and extract: the webhook JSON schema, signature verification scheme, text fetch API, and send API. Create a spec-capture doc shaped like `docs/webex-messaging-webhooks.md`, saved at
+`docs/<platform-slug>-webhooks.md`." Claude Code will search, read, and synthesize the information for you.
 
 ### 2. Create the spec-capture doc (Claude Code can help)
 
