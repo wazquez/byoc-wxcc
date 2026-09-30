@@ -30,6 +30,21 @@ I'll use this to implement the adapter.
 
 Claude Code will search, read the docs, and return a structured spec-capture document.
 
+### Phase 1.5: Scaffold the plumbing
+
+Once you have the spec doc, scaffold the repo-specific wiring in one step instead of
+doing it by hand:
+
+```
+/new-channel-adapter <slug>
+```
+
+This copies `src/channels/_channel-template/` and wires `config.ts`, `.env.example`,
+`registry.ts`, the `app.ts`/`server.ts` route mounting, and a
+`docs/channels/<slug>.md` skeleton — with a collision check against an existing
+folder or `channelId`. It does **not** implement anything platform-specific; every
+adapter method is left as a `TODO` for Phase 2 below.
+
 ### Phase 2: Implement the adapter (same or next Claude Code session)
 
 ```
@@ -40,15 +55,16 @@ Here's the [PLATFORM] webhook spec I researched: [paste the spec or reference th
 Here's the reference implementation: src/channels/webex-messaging/
 Here's the reference documentation: docs/channels/webex-messaging.md
 
-Walk me through the checklist in docs/architecture-multi-channel.md#checklist-adding-a-new-channel.
-Implement one adapter method at a time:
+The channel is already scaffolded (src/channels/<slug>/, config.ts, registry.ts,
+routes, docs skeleton via /new-channel-adapter). Implement one adapter method at
+a time:
 1. verifyInboundWebhook ([PLATFORM] signature verification)
 2. resolveExternalConversationId (extract conversation ID from webhook)
 3. parseInboundEvent (normalize to NormalizedInboundMessage)
 4. sendOutboundMessage (send reply via [PLATFORM] API)
 
 After each method, verify with: npm run typecheck && npm test
-Then we'll register in registry.ts, add env vars, write the channel docs, and test end-to-end.
+Then we'll fill in the real .env.example values, finish the channel docs, and test end-to-end.
 ```
 
 Claude Code will work through the checklist methodically, testing after each step.
@@ -115,10 +131,19 @@ What follows is the layer *around* that checklist: how to actually execute it, e
 
 **Workflow:** work through the checklist items one at a time. Do NOT try to "build the whole channel" in one shot. After each adapter method is implemented, verify it compiles and the tests still pass.
 
-1. **Start:** Clone the template.
-   ```bash
-   cp -r src/channels/_channel-template src/channels/<your-channel>
+1. **Start:** Scaffold the plumbing.
    ```
+   /new-channel-adapter <your-channel>
+   ```
+   This copies `_channel-template/` and wires `config.ts`, `.env.example`,
+   `registry.ts`, the `app.ts`/`server.ts` route mounting, and a
+   `docs/channels/<your-channel>.md` skeleton in one step, with a collision check
+   against an existing folder or `channelId`. It leaves every platform-specific
+   method as a `TODO`; steps 2-3 below fill those in. (The manual equivalent, if
+   you'd rather do it by hand, is `cp -r src/channels/_channel-template
+   src/channels/<your-channel>` followed by the checklist in
+   `architecture-multi-channel.md` — but prefer the skill, since it does the same
+   steps consistently and won't silently overwrite an existing channel.)
 
 2. **Hand Claude Code the spec doc + reference implementation:**
    - Your platform's spec-capture doc (the one you gathered facts for, optionally with Claude's help formatting it)
@@ -152,13 +177,13 @@ What follows is the layer *around* that checklist: how to actually execute it, e
        this step.
      - Test: `npm run typecheck && npm test`
 
-4. **Fill in the manifest** (`manifest.ts`): set `channelId` to your platform name (must match the Control Hub channel name), and declare `capabilities` honestly — `attachments: true` only once inbound staging and outbound upload are actually implemented and tested, not just because the platform itself supports files.
+4. **Verify the manifest** (`manifest.ts`): step 1's skill already wired `channelId` to a new `config.ts` entry — confirm it matches the Control Hub channel name, and set `capabilities` honestly — `attachments: true` only once inbound staging and outbound upload are actually implemented and tested, not just because the platform itself supports files.
 
-5. **Register in `src/core/registry.ts`:** one `import` line + one `registerChannel(...)` call. See the Webex example in that file.
+5. **Registry:** already done by step 1 (one `import` + one `registerChannel(...)` call in `src/core/registry.ts`) — verify it's there and matches the Webex example's pattern.
 
-6. **Environment variables** (`.env.example`): add your platform's config (bot token, webhook secret, etc.) with clear comments explaining where each comes from.
+6. **Environment variables** (`.env.example`): step 1 added a placeholder section — replace the placeholder credential names/values with whatever your platform actually needs, with clear comments explaining where each comes from.
 
-7. **Write `docs/channels/<your-channel>.md`:** document what you built, following the shape of [`docs/channels/webex-messaging.md`](channels/webex-messaging.md). Sections: Overview, Inbound (webhook envelope, signature verification, parsing quirks, sender identity logic), Outbound, Configuration, Known limitations, See also. **Explicitly note which decisions are specific to your platform vs. which are generic patterns** — Claude Code will have added comments in your code already, but the doc should restate it so the next maintainer understands the choices.
+7. **Finish `docs/channels/<your-channel>.md`:** step 1 created a `TODO`-marked skeleton — fill in the real content, following the shape of [`docs/channels/webex-messaging.md`](channels/webex-messaging.md). Sections: Overview, Inbound (webhook envelope, signature verification, parsing quirks, sender identity logic), Outbound, Configuration, Known limitations, See also. **Explicitly note which decisions are specific to your platform vs. which are generic patterns** — Claude Code will have added comments in your code already, but the doc should restate it so the next maintainer understands the choices.
 
 8. **Test end-to-end:** `npm run dev`, send one message from your platform, watch the logs
    for `[inbound]` (your channel) and `[wxcc]` (everything from WxCC) markers, confirm it
@@ -222,7 +247,8 @@ a second `LocalFileRelay` for the route.
 
 ## See also
 
+- `/new-channel-adapter` (`.claude/skills/new-channel-adapter/`) — the Claude Code skill that automates step 1 of the checklist above (template copy + config/registry/route wiring + docs skeleton)
 - [`docs/architecture-multi-channel.md`](architecture-multi-channel.md) — the `ChannelAdapter` interface contract and folder layout
 - [`docs/channels/webex-messaging.md`](channels/webex-messaging.md) — a worked-through example of a complete channel implementation
-- [`src/channels/_channel-template/`](../src/channels/_channel-template/) — the blank template you copy
+- [`src/channels/_channel-template/`](../src/channels/_channel-template/) — the blank template the skill copies (or copy by hand if you skip the skill)
 - [`CLAUDE.md`](../CLAUDE.md) — the project's persistent instructions (read the "Multi-channel extensibility" and "Working agreements" sections)
