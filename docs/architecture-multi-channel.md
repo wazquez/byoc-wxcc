@@ -185,6 +185,29 @@ Build this into the schema now, even though the storage engine (Postgres / SQLit
 Redis) is still undecided — adding the `channelId` column later, after data already
 exists for one channel, is exactly the kind of retrofit this design is meant to avoid.
 
+## Per-channel WxCC config: business address isn't shared either
+
+Easy to miss, and a real bug this project hit once already: a channel's WxCC
+**business address** (Create Task's `destination.id`) is just as channel-specific
+as its `channelId`, and for the same structural reason. Per
+`docs/wxcc-byoc-custom-messaging.md`, `destination.id` resolves to exactly one
+Custom Messaging **asset**, which resolves to exactly one **entry point**, mapped
+to exactly one **flow**. A second channel that needs its own routing (its own
+queue/skill/flow) needs its own asset in Control Hub — and therefore its own
+business address. There is no way to share one business address across two
+channels that route differently.
+
+`Orchestrator` reflects this: it takes a `getBusinessAddress: (channelId: string)
+=> string` function (never a single string), resolved in `server.ts`'s
+`businessAddressByChannel` map at the composition root — the same place
+`registerAllChannels()` and each channel's route wiring already happen. Adding a
+channel means adding one entry to that map (and its own `*_BUSINESS_ADDRESS` env
+var), exactly as mechanical as the one-line `registerChannel()` addition in
+`registry.ts`. Skipping this and reusing an existing channel's business address
+"temporarily" will not fail loudly — it will route the new channel's tasks into
+the wrong (or a nonexistent) asset, something that only an actual end-to-end test
+is likely to surface.
+
 ## Checklist: adding a new channel
 
 1. Copy `src/channels/_channel-template/` to `src/channels/<new-channel>/`.
@@ -197,12 +220,18 @@ exists for one channel, is exactly the kind of retrofit this design is meant to 
    not a copy of the Webex adapter's specific choices.
 4. Register the adapter in `src/core/registry.ts` (one line — core does not otherwise change).
 5. Add the new channel's own credentials to `.env.example` (never commit real values).
-6. Add `docs/channels/<new-channel>.md` documenting that platform's webhook payload
+6. Add the channel's own `*_BUSINESS_ADDRESS` env var and one entry to
+   `businessAddressByChannel` in `server.ts` — see "Per-channel WxCC config:
+   business address isn't shared either" above. Easy to skip since nothing fails
+   loudly until an end-to-end test; don't reuse another channel's value even
+   "temporarily."
+7. Add `docs/channels/<new-channel>.md` documenting that platform's webhook payload
    shape, signature scheme, and any quirks — see
    [`docs/channels/webex-messaging.md`](channels/webex-messaging.md) for a worked example.
-7. Configure the corresponding Custom Messaging channel/asset/entry point/flow in
-   WxCC Control Hub for the new channel.
-8. Test the same vertical slice as the first channel: one message round-tripped
+8. Configure the corresponding Custom Messaging channel/asset/entry point/flow in
+   WxCC Control Hub for the new channel — this is what the business address from
+   step 6 actually has to resolve to.
+9. Test the same vertical slice as the first channel: one message round-tripped
    end-to-end before anything else.
 
 If any of these steps require touching a file under `src/core/`, that's a signal the

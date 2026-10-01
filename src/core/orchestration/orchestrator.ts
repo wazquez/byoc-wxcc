@@ -68,9 +68,17 @@ export interface OrchestratorDeps {
   tasksClient: WxccTasksClient;
   /** Registry lookup — kept as a function so orchestration doesn't import the registry. */
   getAdapter: (channelId: string) => ChannelAdapter | undefined;
-  /** Custom Messaging channel name + business address from config. */
-  channel: string;
-  businessAddress: string;
+  /**
+   * Resolves a channelId to the WxCC business address (Create Task's
+   * `destination.id`) for that channel's own Custom Messaging asset. A
+   * function, not a single value — per docs/wxcc-byoc-custom-messaging.md,
+   * `destination.id` resolves to exactly one asset, which resolves to exactly
+   * one entry point/flow, so each channel with its own routing needs its own
+   * asset and therefore its own business address. Kept as a lookup (mirroring
+   * `getAdapter` above) rather than a single string, which would silently
+   * misroute every channel except whichever one it was set to.
+   */
+  getBusinessAddress: (channelId: string) => string;
   /** Injectable id generator (aliasId must be a UUID per the BYOC spec); defaults to randomUUID. */
   newAliasId?: () => string;
 }
@@ -91,7 +99,7 @@ export class Orchestrator {
     channelId: string,
     message: NormalizedInboundMessage,
   ): Promise<void> => {
-    const { store, tasksClient, channel, businessAddress } = this.deps;
+    const { store, tasksClient, getBusinessAddress } = this.deps;
     const aliasId = this.newAliasId();
     const payload = {
       aliasId,
@@ -113,8 +121,11 @@ export class Orchestrator {
         // Only meaningful on create — WxCC's Append Message has no origin/name
         // field, so senderName is simply unused on the append path below.
         originName: message.senderName,
-        destinationId: businessAddress,
-        channel,
+        destinationId: getBusinessAddress(channelId),
+        // channelId doubles as the WxCC `channel` field — every ChannelAdapter's
+        // channelId is already required to equal its Control Hub channel name
+        // (see channel-adapter.ts), so there's no separate value to look up here.
+        channel: channelId,
         message: payload,
       });
       await store.save({

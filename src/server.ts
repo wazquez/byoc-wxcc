@@ -32,12 +32,24 @@ function buildOrchestrator(): Orchestrator {
   });
   const tasksClient = new WxccTasksClient(config.wxcc.apiBaseUrl, tokens);
 
+  // Per-channel business address (Create Task destination.id) — each channel
+  // resolves to its own Custom Messaging asset, so this can't be a single value
+  // (see the doc comment on OrchestratorDeps.getBusinessAddress). Adding a
+  // channel means adding one entry here, the same one-line shape as
+  // registerChannel() in registry.ts.
+  const businessAddressByChannel: Record<string, string> = {
+    [config.webexMessaging.channelName]: config.webexMessaging.businessAddress,
+  };
+
   return new Orchestrator({
     store,
     tasksClient,
     getAdapter: getChannel,
-    channel: config.webexMessaging.channelName,
-    businessAddress: config.wxcc.businessAddress,
+    getBusinessAddress: (channelId) => {
+      const address = businessAddressByChannel[channelId];
+      if (!address) throw new Error(`No configured business address for channel "${channelId}"`);
+      return address;
+    },
   });
 }
 

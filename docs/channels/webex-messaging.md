@@ -92,7 +92,7 @@ text (if any) rides along with the first attachment rather than as a separate me
 | `WEBEX_BOT_TOKEN` | Bot account's OAuth token — used for (1) message API calls (GET /messages, POST /messages) and (2) bot identity lookup (GET /people/me) | Webex app/bot account creation (create a bot via developer.webex.com) |
 | `WEBEX_MESSAGING_WEBHOOK_SECRET` | Secret supplied when the messages/created webhook is registered — used to verify inbound signatures | Set during webhook creation in `webhook-route.ts` (or manually registered with Webex; the middleware can also auto-register if given permission) |
 | `WEBEX_MESSAGING_CHANNEL_NAME` | Name of this channel as registered in the adapter (must match Control Hub's Custom Messaging channel name for correlation) | Control Hub: Custom Messaging channel config |
-| `WXCC_BUSINESS_ADDRESS` | WxCC side: the business address configured on the Custom Messaging asset — sent as `destination.id` in Create Task calls | Control Hub: Custom Messaging asset config |
+| `WEBEX_MESSAGING_BUSINESS_ADDRESS` | WxCC side: the business address configured on THIS channel's own Custom Messaging asset — sent as `destination.id` in Create Task calls. Per-channel (not a single global value) — see `Orchestrator.getBusinessAddress` in `orchestrator.ts` | Control Hub: Custom Messaging asset config |
 
 **Control Hub setup** (human one-time config, not in code):
 

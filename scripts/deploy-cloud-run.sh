@@ -39,7 +39,7 @@ gcloud run deploy "$CLOUD_RUN_SERVICE" \
   --no-invoker-iam-check \
   --platform managed \
   --port=8080 \
-  --min-instances=0 \
+  --min-instances=1 \
   --max-instances=1 # required: correlation store + file relay are in-memory, single-instance only
 
 echo "==> Done."

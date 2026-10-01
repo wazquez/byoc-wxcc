@@ -23,6 +23,8 @@ function fakeTasksClient() {
   } as any;
 }
 
+const BUSINESS_ADDRESS_BY_CHANNEL: Record<string, string> = { 'webex-messaging': 'support@channel.biz' };
+
 function setup(adapter?: Partial<ChannelAdapter>) {
   const store = new InMemoryCorrelationStore();
   const tasksClient = fakeTasksClient();
@@ -32,8 +34,11 @@ function setup(adapter?: Partial<ChannelAdapter>) {
     store,
     tasksClient,
     getAdapter: (id) => (id === 'webex-messaging' ? fullAdapter : undefined),
-    channel: 'webex-messaging',
-    businessAddress: 'support@channel.biz',
+    getBusinessAddress: (id) => {
+      const address = BUSINESS_ADDRESS_BY_CHANNEL[id];
+      if (!address) throw new Error(`no business address for ${id}`);
+      return address;
+    },
     newAliasId: () => 'alias-fixed',
   });
   return { orch, store, tasksClient, sendOutboundMessage };
@@ -88,6 +93,38 @@ describe('Orchestrator inbound', () => {
 
     expect(tasksClient.createTask).toHaveBeenCalledWith(
       expect.objectContaining({ message: expect.objectContaining({ attachments }) }),
+    );
+  });
+
+  it('uses each message\'s OWN channelId for the WxCC channel field and its OWN business address — not another registered channel\'s', async () => {
+    // Regression test: OrchestratorDeps used to take a single fixed `channel` +
+    // `businessAddress` at construction, so every inbound message reported the
+    // SAME WxCC channel/destination regardless of which adapter it actually
+    // came from. This proves two distinct channels each get their own values.
+    const store = new InMemoryCorrelationStore();
+    const tasksClient = fakeTasksClient();
+    const businessAddressByChannel: Record<string, string> = {
+      'webex-messaging': 'support@channel.biz',
+      teams: 'support@teams.biz',
+    };
+    const orch = new Orchestrator({
+      store,
+      tasksClient,
+      getAdapter: () => undefined, // unused on the inbound path
+      getBusinessAddress: (id) => businessAddressByChannel[id],
+      newAliasId: () => 'alias-fixed',
+    });
+
+    await orch.handleInboundMessage('webex-messaging', inbound({ externalConversationId: 'room-1', text: 'hi' }));
+    await orch.handleInboundMessage('teams', inbound({ externalConversationId: 'conv-1', text: 'hi' }));
+
+    expect(tasksClient.createTask).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ channel: 'webex-messaging', destinationId: 'support@channel.biz' }),
+    );
+    expect(tasksClient.createTask).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ channel: 'teams', destinationId: 'support@teams.biz' }),
     );
   });
 });

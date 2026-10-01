@@ -110,7 +110,9 @@ Gather these — you'll need them in `.env.example` (step 5 of the checklist):
 
 ### 4. Control Hub access (if available yet)
 
-Create the Custom Messaging channel, asset, entry point, and flow for this platform in WxCC Control Hub. Note the `business_address` and other values you'll need in `.env`.
+Create the Custom Messaging channel, asset, entry point, and flow for this platform in WxCC Control Hub. Note the business address and other values you'll need in `.env`.
+
+**This business address is per-channel, not shared with any other channel you've already set up** — a second channel with its own routing needs its own Custom Messaging asset, and therefore its own business address. The skill wires the plumbing for this (a `*_BUSINESS_ADDRESS` env var and an entry in `server.ts`'s `businessAddressByChannel` map), but it fails silently (not at compile time) if you leave the value blank or point two channels at the same one — see "Per-channel WxCC config: business address isn't shared either" in [`architecture-multi-channel.md`](architecture-multi-channel.md), and the matching troubleshooting entry below.
 
 ### 5. Provision the WxCC task-lifecycle subscriptions (manual, one-time)
 
@@ -219,6 +221,9 @@ Write your own `docs/channels/<your-channel>.md` decisions section. For example,
 - `capabilities.attachments` matches reality: `false` is a perfectly fine, honest state
   if you haven't built attachment support yet — don't set it `true` because the
   platform can do it if the adapter can't yet.
+- The channel's own `*_BUSINESS_ADDRESS` has a real (non-empty, non-copy-pasted-from-
+  another-channel) value in **every** environment this runs in, not just locally —
+  check a separate deployment's env vars explicitly, they don't inherit from `.env`.
 
 ## Troubleshooting
 
@@ -238,6 +243,15 @@ left pointing at an old public URL after you rotated the tunnel/domain — it ke
 with an old secret. Fix: list your subscriptions (Postman/Bruno), delete or re-point the
 stale ones, and update the asset webhook URL too. See
 [`wxcc-webhooks-cc.md`](wxcc-webhooks-cc.md) → "Provisioning subscriptions".
+
+**"No configured business address for channel ..." thrown on the first inbound message:**
+Your channel's `*_BUSINESS_ADDRESS` env var is unset (or empty), or `server.ts`'s
+`businessAddressByChannel` map is missing an entry for this `channelId`. Note this
+is checked **per environment separately** — e.g. a local `.env` can be correct
+while a separate deployment (Cloud Run, etc.) still has the old/missing value,
+since those env vars aren't read from `.env` and don't update automatically when
+you change it locally. See "Per-channel WxCC config: business address isn't
+shared either" in [`architecture-multi-channel.md`](architecture-multi-channel.md).
 
 **Attachment URLs return 404 (if you're using `LocalFileRelay`):**
 `LocalFileRelay.stage()` and the `GET /files/:id` route that serves it share an

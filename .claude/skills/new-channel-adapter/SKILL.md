@@ -78,16 +78,27 @@ style exactly):
   webhookSecret: env('<SLUG_UPPER>_WEBHOOK_SECRET'),
   /** Must match the Custom Messaging channel name in Control Hub. */
   channelName: env('<SLUG_UPPER>_CHANNEL_NAME', '<slug>'),
+  /**
+   * Business address configured on THIS channel's own Custom Messaging asset —
+   * NOT shareable with another channel's value. See
+   * docs/architecture-multi-channel.md -> "Per-channel WxCC config: business
+   * address isn't shared either" for why (destination.id resolves to exactly
+   * one asset -> one entry point -> one flow).
+   */
+  businessAddress: env('<SLUG_UPPER>_BUSINESS_ADDRESS'),
 },
 ```
 
 Adjust the actual credential fields to whatever the real platform needs — this is
-a starting shape, not a fixed one.
+a starting shape, not a fixed one. `businessAddress` is NOT a starting-shape field
+to adjust away, though — every channel needs one, for the structural reason above.
 
 Then add the matching block to `.env.example`, next to (not replacing) the
 existing Webex Messaging section, with real comments explaining what each var is
 for (mirror the existing `WEBEX_*` comments' level of detail) and placeholder
-values like `changeme-<slug>-...`. Never put a real credential in `.env.example`.
+values like `changeme-<slug>-...`. Never put a real credential in `.env.example`
+— but `*_BUSINESS_ADDRESS` isn't a secret, just a placeholder identifier, same as
+`WEBEX_MESSAGING_BUSINESS_ADDRESS`.
 
 ## Step 4 — Register the adapter
 
@@ -126,6 +137,21 @@ requirement they missed:
    `docs/architecture-multi-channel.md`, a second channel's relay can't share the
    Webex one's mount path. Skip this entirely if `capabilities.attachments` is
    `false` for now; it's easy to add later.
+4. Add one entry to the `businessAddressByChannel` map in `buildOrchestrator()`
+   (`server.ts`), keyed by this channel's `channelName`, valued from the
+   `businessAddress` config field added in Step 3:
+   ```ts
+   const businessAddressByChannel: Record<string, string> = {
+     [config.webexMessaging.channelName]: config.webexMessaging.businessAddress,
+     [config.<camelSlug>.channelName]: config.<camelSlug>.businessAddress,
+   };
+   ```
+   This is NOT optional and NOT the same thing as Step 4 in
+   `docs/architecture-multi-channel.md`'s checklist (registering the adapter) —
+   skipping this makes `getBusinessAddress` throw at runtime the first time this
+   channel's first message tries to create a WxCC task. See
+   `docs/architecture-multi-channel.md` -> "Per-channel WxCC config: business
+   address isn't shared either" for why this can't just reuse Webex's value.
 
 ## Step 6 — Create the channel doc
 
@@ -163,6 +189,12 @@ platform-specific knowledge this skill can't invent:
 - Filling in the real config/env var names in Step 3 if the placeholders don't match the platform's actual credential model
 - `docs/channels/<slug>.md` — the real technical content once the above is implemented
 - Manual Control Hub setup: a Custom Messaging channel/asset/entry point/flow for this new channel (out-of-band, no code)
+- Filling in the REAL `*_BUSINESS_ADDRESS` value in `.env` once that Control Hub
+  asset exists — the scaffold wires the plumbing (config field + `businessAddressByChannel`
+  entry), but an empty/placeholder value will fail closed at the first inbound
+  message, not at compile time. Remember this in BOTH environments if there's a
+  separate deployment (e.g. Cloud Run) — its env vars don't come from `.env` and
+  won't pick this up automatically.
 - Testing the same vertical slice as Webex Messaging: one message round-tripped end-to-end before anything else
 
 Remind the user `src/channels/webex-messaging/` is the reference implementation

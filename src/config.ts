@@ -44,8 +44,6 @@ export const config = {
      * Must match the org's data center; there is no universal default.
      */
     apiBaseUrl: env('WXCC_API_BASE_URL', 'https://api.wxcc-us1.cisco.com'),
-    /** Business address configured on the Custom Messaging asset (Create Task destination.id). */
-    businessAddress: env('WXCC_BUSINESS_ADDRESS'),
   },
 
   /** Webex Messaging (reference channel) config. */
@@ -54,6 +52,15 @@ export const config = {
     webhookSecret: env('WEBEX_MESSAGING_WEBHOOK_SECRET'),
     /** Must match the Custom Messaging channel name in Control Hub. */
     channelName: env('WEBEX_MESSAGING_CHANNEL_NAME', 'webex-messaging'),
+    /**
+     * Business address configured on THIS channel's own Custom Messaging asset
+     * (Create Task destination.id). Lives per-channel, not under `wxcc` above,
+     * because destination.id resolves to exactly one asset -> one entry point ->
+     * one flow (docs/wxcc-byoc-custom-messaging.md) — a second channel with its
+     * own routing needs its own asset, hence its own business address. See
+     * Orchestrator's `getBusinessAddress` lookup in orchestrator.ts.
+     */
+    businessAddress: env('WEBEX_MESSAGING_BUSINESS_ADDRESS'),
   },
 } as const;
 

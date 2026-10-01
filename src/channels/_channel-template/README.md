@@ -11,7 +11,12 @@ Then follow the checklist in [`docs/architecture-multi-channel.md`](../../../doc
    and set `capabilities` honestly.
 4. Register the adapter in `src/core/registry.ts` (one line).
 5. Add your channel's credentials to `.env.example`.
-6. Add `docs/channels/<your-channel>.md` documenting the payload shape + signature
+6. Add your channel's own `*_BUSINESS_ADDRESS` env var and one entry in
+   `businessAddressByChannel` (`server.ts`) — **do not skip this or reuse another
+   channel's value**; it fails silently until the first real inbound message. See
+   "Per-channel WxCC config: business address isn't shared either" in
+   `docs/architecture-multi-channel.md`.
+7. Add `docs/channels/<your-channel>.md` documenting the payload shape + signature
    scheme.
 
 If any step makes you edit something under `src/core/`, stop — that means the

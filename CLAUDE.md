@@ -210,7 +210,9 @@ file — the rest of the codebase depends only on its interface.
 **Common failure reasons in `task:failed`:**
 - `CONVERSATION_ALREADY_OPEN` — a task already exists for this customer. Recovery: only
   call End Task after confirming the earlier one is genuinely stale.
-- `CHANNEL_ASSET_UNDEFINED` — custom-messaging asset not found (check `WXCC_BUSINESS_ADDRESS`).
+- `CHANNEL_ASSET_UNDEFINED` — custom-messaging asset not found (check the failing channel's
+  own `*_BUSINESS_ADDRESS` var, e.g. `WEBEX_MESSAGING_BUSINESS_ADDRESS` — this is per-channel,
+  not a single global value, since `destination.id` resolves to one specific asset).
 - `ENTRY_POINT_NOT_FOUND`, `FEATURE_FLAG_DISABLED`, `ORG_DIGITAL_CONTACT_LIMIT_EXCEEDED` — org/config issues.
 - `CONVERSATION_CREATION_FAILED` — routing or flow issue.
 
